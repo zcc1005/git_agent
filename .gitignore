@@ -1,0 +1,58 @@
+# Python cache and tooling
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and local config
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+!.env.example
+
+# Jupyter and notebooks runtime files
+.ipynb_checkpoints/
+
+# Deep learning datasets and generated artifacts
+deep_learning_practice_tasks1_2/deep_learning_practice_project/data/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/outputs/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/
+
+# Model weights, checkpoints, and serialized training outputs
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.h5
+*.pkl
+*.joblib
+
+# Archives and downloaded datasets
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+
+# OS and editor metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
