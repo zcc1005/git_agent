@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>工业皮带异物检测与智能报警系统</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='web_app.css') }}">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <h1>工业皮带异物检测与智能报警系统</h1>
+        <p>任务1 语音/命令识别 · 任务2 YOLO 异物检测 · 任务3 LoRA-Qwen 报警生成</p>
+      </div>
+      <div id="statusBadge" class="status-badge">就绪</div>
+    </header>
+
+    <section class="workspace">
+      <form id="pipelineForm" class="control-panel">
+        <div class="section-title">任务1 · 输入命令</div>
+        <div class="segmented" role="radiogroup" aria-label="手动命令">
+          <label><input type="radio" name="command" value="go" checked><span>go</span></label>
+          <label><input type="radio" name="command" value="stop"><span>stop</span></label>
+          <label><input type="radio" name="command" value="yes"><span>yes</span></label>
+          <label><input type="radio" name="command" value="no"><span>no</span></label>
+        </div>
+
+        <div class="mic-row">
+          <button id="micButton" type="button" class="secondary-button">麦克风识别</button>
+          <label class="small-field">
+            <span>录音秒数</span>
+            <input id="recordSeconds" type="number" min="0.5" step="0.5" value="2.5">
+          </label>
+        </div>
+        <div id="micResult" class="hint">可手动选择命令，也可点击麦克风识别。</div>
+
+        <div class="section-title">任务2 · 选择图片</div>
+        <label class="file-picker">
+          <input id="imageInput" name="image" type="file" accept="image/*" required>
+          <span>选择需要检测的图片</span>
+        </label>
+        <img id="previewImage" class="preview-image" alt="待检测图片预览">
+
+        <div class="param-grid">
+          <label>
+            <span>YOLO 置信度</span>
+            <input id="confInput" name="conf" type="number" min="0.01" max="1" step="0.01" value="0.15">
+          </label>
+          <label>
+            <span>报警 Top K</span>
+            <input id="topKInput" name="top_k" type="number" min="1" max="20" step="1" value="5">
+          </label>
+          <label>
+            <span>Qwen 设备</span>
+            <select id="qwenDevice" name="qwen_device">
+              <option value="cpu" selected>cpu</option>
+              <option value="auto">auto</option>
+              <option value="cuda">cuda</option>
+            </select>
+          </label>
+        </div>
+
+        <button id="runButton" type="submit" class="primary-button">运行完整流程</button>
+      </form>
+
+      <section class="result-panel">
+        <div class="section-title">流程状态</div>
+        <div class="step-grid">
+          <div class="step-card">
+            <strong>任务1</strong>
+            <span id="commandSummary">等待命令</span>
+          </div>
+          <div class="step-card">
+            <strong>任务2</strong>
+            <span id="detectionSummary">等待检测</span>
+          </div>
+          <div class="step-card">
+            <strong>任务3</strong>
+            <span id="alarmSummary">等待报告</span>
+          </div>
+        </div>
+
+        <div class="progress-wrap" aria-label="运行进度">
+          <div class="progress-track">
+            <div id="progressFill" class="progress-fill"></div>
+          </div>
+          <div class="progress-labels">
+            <span id="progressText">等待运行</span>
+            <span id="progressPercent">0%</span>
+          </div>
+        </div>
+
+        <div class="output-grid">
+          <section class="output-block">
+            <div class="block-head">
+              <h2>检测框图</h2>
+              <span id="imagePath"></span>
+            </div>
+            <div class="image-frame">
+              <img id="resultImage" alt="检测结果框图">
+              <div id="imagePlaceholder">运行后显示 YOLO 检测框图</div>
+            </div>
+          </section>
+
+          <section class="output-block">
+            <div class="block-head">
+              <h2>报警报告</h2>
+              <span id="alarmPath"></span>
+            </div>
+            <pre id="alarmReport">运行后显示 outputs/alarm_report.txt 内容</pre>
+          </section>
+        </div>
+
+        <section class="json-row">
+          <div>
+            <h2>command.json</h2>
+            <pre id="commandJson">{}</pre>
+          </div>
+          <div>
+            <h2>detection.json 摘要</h2>
+            <pre id="detectionJson">{}</pre>
+          </div>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='web_app.js') }}"></script>
+</body>
+</html>
