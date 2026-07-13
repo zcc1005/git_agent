@@ -64,6 +64,7 @@ class YoloAnnotator:
         start: int = 0,
         max_window_w: int = 1280,
         max_window_h: int = 800,
+        review_unknown: bool = False,
     ):
         self.data_dir = data_dir
         self.split = split
@@ -78,6 +79,9 @@ class YoloAnnotator:
         self.images = sorted(
             [p for p in self.image_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS]
         )
+
+        if review_unknown:
+            self.images = [p for p in self.images if self.needs_unknown_review(p)]
 
         if not self.images:
             raise RuntimeError(f"No images found: {self.image_dir}")
@@ -96,7 +100,8 @@ class YoloAnnotator:
         self.image = None
         self.win_name = (
             "Annotate foreign objects: 1 stone | 2 plastic | 3 metal | "
-            "4 wood | 5 unknown | drag | s save | n none | u undo | r reset | q quit"
+            "4 wood | 5 unknown | drag | right-click reclassify | s save | "
+            "n none | u undo | r reset | q quit"
         )
 
         print(f"Dataset: {self.data_dir}")
@@ -110,6 +115,7 @@ class YoloAnnotator:
         print("Controls:")
         print("  1-5: select object type")
         print("  Mouse drag: draw a box using the selected type")
+        print("  Right click inside a box: change that box to the selected type")
         print("  s: save current image and go next")
         print("  n: save empty label for no foreign object")
         print("  u: undo last box")
@@ -118,6 +124,23 @@ class YoloAnnotator:
 
     def yolo_label_path(self, image_path: Path) -> Path:
         return self.label_dir / f"{image_path.stem}.txt"
+
+    def needs_unknown_review(self, image_path: Path) -> bool:
+        """Select missing, malformed, or class-0 labels for focused reclassification."""
+        label_path = self.yolo_label_path(image_path)
+        if not label_path.exists():
+            return True
+        for line in label_path.read_text(encoding="utf-8").splitlines():
+            parts = line.strip().split()
+            if not parts:
+                continue
+            try:
+                class_id = int(parts[0])
+            except (ValueError, IndexError):
+                return True
+            if len(parts) != 5 or class_id == CLASS_NAME_TO_ID["unknown"]:
+                return True
+        return False
 
     def load_existing_boxes(self, image_path: Path, w: int, h: int) -> List[Box]:
         label_path = self.yolo_label_path(image_path)
@@ -257,6 +280,23 @@ class YoloAnnotator:
             if abs(x2 - x1) >= 3 and abs(y2 - y1) >= 3:
                 self.boxes.append((self.current_class_id, x1, y1, x2, y2))
 
+        elif event == cv2.EVENT_RBUTTONUP:
+            original_x, original_y = self.to_original_xy(x, y)
+            candidates = []
+            for index, (_, x1, y1, x2, y2) in enumerate(self.boxes):
+                left, right = sorted((x1, x2))
+                top, bottom = sorted((y1, y2))
+                if left <= original_x <= right and top <= original_y <= bottom:
+                    candidates.append(((right - left) * (bottom - top), index))
+            if candidates:
+                _, index = min(candidates)
+                _, x1, y1, x2, y2 = self.boxes[index]
+                self.boxes[index] = (self.current_class_id, x1, y1, x2, y2)
+                print(
+                    f"Reclassified box {index + 1} as "
+                    f"{class_label(self.current_class_id)}"
+                )
+
     def handle_class_key(self, key: int) -> bool:
         if key not in KEY_TO_CLASS_ID:
             return False
@@ -320,9 +360,19 @@ def main():
     parser.add_argument("--data_dir", type=Path, default=YOLO_DATA_DIR)
     parser.add_argument("--split", type=str, default="train", choices=["train", "val", "test"])
     parser.add_argument("--start", type=int, default=0)
+    parser.add_argument(
+        "--review-unknown",
+        action="store_true",
+        help="只查看缺标签、坏标签或含 unknown(0) 框的图片",
+    )
     args = parser.parse_args()
 
-    YoloAnnotator(args.data_dir, args.split, args.start).run()
+    YoloAnnotator(
+        args.data_dir,
+        args.split,
+        args.start,
+        review_unknown=args.review_unknown,
+    ).run()
 
 
 if __name__ == "__main__":

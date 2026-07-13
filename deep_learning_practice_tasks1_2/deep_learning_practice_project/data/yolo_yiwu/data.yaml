@@ -1,3 +1,4 @@
+# 每个 txt 的第一列必须严格使用以下 0-4 类别 ID；train/val/test 映射必须一致。
 train: images/train
 val: images/val
 test: images/test

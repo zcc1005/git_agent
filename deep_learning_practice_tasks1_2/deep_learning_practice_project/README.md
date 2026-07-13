@@ -3,7 +3,7 @@
 本项目包含三个任务：
 
 - 任务一：基于 Transformer Encoder 的语音命令识别，输出 `outputs/command.json`。
-- 任务二：基于 YOLOv8n 的工业皮带单类异物检测，类别为 `yiwu`，输出 `outputs/detection.json` 和 `outputs/detections_vis/`。
+- 任务二：基于 YOLOv8 的工业皮带五类异物检测，类别为 `unknown/stone/plastic/metal/wood`，输出 `outputs/detection.json` 和 `outputs/detections_vis/`。
 - 任务三：基于 LoRA 微调 `Qwen/Qwen2.5-0.5B-Instruct`，读取 `outputs/detection.json`，生成工业报警报告 `outputs/alarm_report.txt`。
 
 ## 1. 环境安装
@@ -79,11 +79,25 @@ python task2_yolo/annotate_yiwu.py --split train
 python task2_yolo/annotate_yiwu.py --split val
 ```
 
+如果旧验证集的框仍然全是 `unknown(0)`，可只复查这些图片。先按 `1-5` 选择类别，再在已有框内单击鼠标右键即可改类，最后按 `s` 保存：
+
+```bash
+python task2_yolo/annotate_yiwu.py --split val --review-unknown
+```
+
+训练前检查路径、缺失标签、坐标范围和每个划分的类别分布：
+
+```bash
+python task2_yolo/check_yolo_dataset.py --data data/yolo_yiwu/data.yaml
+```
+
 训练 YOLO：
 
 ```bash
-python task2_yolo/train_yolo.py --epochs 50 --imgsz 640 --batch 8
+python task2_yolo/train_yolo.py --model yolov8s.pt --epochs 150 --imgsz 800 --batch 8
 ```
+
+`train_yolo.py` 会自动执行同样的数据检查；存在缺失标签或验证集缺类时会停止，避免产生看似正常但指标无效的权重。
 
 根据任务一的 `command.json` 启动检测：
 
