@@ -12,11 +12,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from project_config import ALARM_ADAPTER_DIR, ALARM_DATASET_PATH
 from task3_alarm.alarm_common import DEFAULT_MODEL_NAME, SYSTEM_PROMPT
 
 
-DATASET_PATH = PROJECT_ROOT / "task3_alarm" / "alarm_train_100.jsonl"
-OUTPUT_DIR = PROJECT_ROOT / "outputs" / "task3_alarm" / "qwen_alarm_lora"
+DATASET_PATH = ALARM_DATASET_PATH
+OUTPUT_DIR = ALARM_ADAPTER_DIR
 
 
 def check_dependencies() -> None:

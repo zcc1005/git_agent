@@ -1,10 +1,8 @@
-from pathlib import Path
+from project_config import OUTPUTS_DIR, PROJECT_ROOT, YOLO_DATA_DIR, YOLO_RUN_DIR
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RAW_ZIP = PROJECT_ROOT / "data" / "raw" / "yolo_images.zip"
-YOLO_DATA_DIR = PROJECT_ROOT / "data" / "yolo_yiwu"
-OUTPUT_DIR = PROJECT_ROOT / "outputs"
-RUN_DIR = PROJECT_ROOT / "runs" / "yolo"
+OUTPUT_DIR = OUTPUTS_DIR
+RUN_DIR = YOLO_RUN_DIR
 
 CLASS_NAMES = ["unknown", "stone", "plastic", "metal", "wood"]
 CLASS_DISPLAY_NAMES = {
