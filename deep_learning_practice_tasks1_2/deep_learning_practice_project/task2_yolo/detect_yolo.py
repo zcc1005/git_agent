@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 
 from ultralytics import YOLO
 
+from project_config import OUTPUTS_DIR, YOLO_MODEL_PATH
 from task2_yolo.yolo_config import CLASS_DISPLAY_NAMES, CLASS_ID_TO_NAME, CLASS_NAMES
 
 
@@ -126,7 +127,7 @@ def detect_yiwu(
     if not model_path.exists():
         raise FileNotFoundError(
             f"没有找到 YOLO 模型权重：{model_path}\n"
-            "请确认模型是否已训练完成，默认路径为 runs/yolo/foreign_objects_yolov8n/weights/best.pt"
+            "请确认模型是否已训练完成，默认路径为 runs/yolo/yiwu_yolov8n/weights/best.pt"
         )
 
     if not source.exists():
@@ -238,14 +239,14 @@ def main() -> None:
     parser.add_argument(
         "--model",
         type=Path,
-        default=PROJECT_ROOT / "runs" / "yolo" / "foreign_objects_yolov8n" / "weights" / "best.pt",
+        default=YOLO_MODEL_PATH,
         help="YOLO 模型权重 best.pt 路径",
     )
 
     parser.add_argument(
         "--output",
         type=Path,
-        default=PROJECT_ROOT / "outputs" / "detection.json",
+        default=OUTPUTS_DIR / "detection.json",
         help="检测结果 JSON 输出路径",
     )
 

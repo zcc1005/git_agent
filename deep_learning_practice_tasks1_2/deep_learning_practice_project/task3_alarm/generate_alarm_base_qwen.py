@@ -18,10 +18,11 @@ from task3_alarm.alarm_common import (
     write_text,
 )
 from task3_alarm.generate_alarm_qwen_lora import check_dependencies
+from project_config import OUTPUTS_DIR
 
 
-DEFAULT_DETECTION_JSON = PROJECT_ROOT / "outputs" / "detection.json"
-DEFAULT_OUTPUT_TXT = PROJECT_ROOT / "outputs" / "alarm_report_base_qwen.txt"
+DEFAULT_DETECTION_JSON = OUTPUTS_DIR / "detection.json"
+DEFAULT_OUTPUT_TXT = OUTPUTS_DIR / "alarm_report_base_qwen.txt"
 
 
 def load_base_model(model_name_or_path: str):
@@ -128,4 +129,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

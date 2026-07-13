@@ -17,11 +17,12 @@ from task3_alarm.alarm_common import (
     read_json,
     write_text,
 )
+from project_config import ALARM_ADAPTER_DIR, OUTPUTS_DIR
 
 
-DEFAULT_DETECTION_JSON = PROJECT_ROOT / "outputs" / "detection.json"
-DEFAULT_ADAPTER_DIR = PROJECT_ROOT / "outputs" / "task3_alarm" / "qwen_alarm_lora"
-DEFAULT_OUTPUT_TXT = PROJECT_ROOT / "outputs" / "alarm_report.txt"
+DEFAULT_DETECTION_JSON = OUTPUTS_DIR / "detection.json"
+DEFAULT_ADAPTER_DIR = ALARM_ADAPTER_DIR
+DEFAULT_OUTPUT_TXT = OUTPUTS_DIR / "alarm_report.txt"
 
 
 def check_dependencies() -> None:

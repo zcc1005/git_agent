@@ -14,6 +14,13 @@
 pip install -r requirements.txt
 ```
 
+模型、数据和输出路径统一在 `project_config.py` 中配置。默认使用项目相对路径，也可以在 PowerShell 中用环境变量临时覆盖：
+
+```powershell
+$env:YOLO_MODEL_PATH="models/yolo/best.pt"
+$env:QWEN_MODEL_NAME="models/Qwen2.5-0.5B-Instruct"
+```
+
 任务三额外依赖如下，如果当前环境尚未安装，可以单独执行：
 
 ```bash
@@ -175,8 +182,9 @@ outputs/alarm_report_base_qwen.txt：原始 Qwen 生成的对比报告
 如果无法联网下载 Qwen 模型，请先联网下载，或把模型提前放到本地路径并用 `--model_name_or_path` 指定：
 
 ```bash
-python task3_alarm/train_lora_qwen.py --model_name_or_path D:/models/Qwen2.5-0.5B-Instruct
-python task3_alarm/generate_alarm_qwen_lora.py --model_name_or_path D:/models/Qwen2.5-0.5B-Instruct
+$env:QWEN_MODEL_NAME="models/Qwen2.5-0.5B-Instruct"
+python task3_alarm/train_lora_qwen.py
+python task3_alarm/generate_alarm_qwen_lora.py
 ```
 
 ## 5. 一键流程

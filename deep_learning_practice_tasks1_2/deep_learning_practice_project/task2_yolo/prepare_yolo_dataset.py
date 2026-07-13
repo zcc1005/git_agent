@@ -53,7 +53,6 @@ def copy_images_and_make_empty_labels(src_dir: Path, dst_root: Path, split: str)
 
 def write_data_yaml(dst_root: Path):
     data = {
-        "path": str(dst_root.resolve()).replace("\\", "/"),
         "train": "images/train",
         "val": "images/val",
         "test": "images/test",

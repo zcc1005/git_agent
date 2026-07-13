@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from project_config import PROJECT_ROOT, QWEN_MODEL_NAME
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MODEL_NAME = "Qwen/Qwen2.5-0.5B-Instruct"
+DEFAULT_MODEL_NAME = QWEN_MODEL_NAME
 SYSTEM_PROMPT = (
     "你是工业皮带异物检测系统的报警报告生成助手。"
     "请根据检测JSON生成结构清晰、语言规范、适合现场处置的工业报警报告。"

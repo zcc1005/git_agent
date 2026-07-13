@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ultralytics import YOLO
 
+from project_config import YOLO_RUN_NAME
 from task2_yolo.yolo_config import RUN_DIR, YOLO_DATA_DIR
 
 
@@ -22,7 +23,7 @@ def main():
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--device", type=str, default=None, help="例如 0 或 cpu；默认自动选择")
     parser.add_argument("--project", type=Path, default=RUN_DIR)
-    parser.add_argument("--name", type=str, default="foreign_objects_yolov8n")
+    parser.add_argument("--name", type=str, default=YOLO_RUN_NAME)
     args = parser.parse_args()
 
     if not args.data.exists():

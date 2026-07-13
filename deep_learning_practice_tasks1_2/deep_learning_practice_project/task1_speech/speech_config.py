@@ -1,9 +1,8 @@
-from pathlib import Path
+from project_config import OUTPUTS_DIR, PROJECT_ROOT, SPEECH_DATA_DIR, SPEECH_RUN_DIR
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = PROJECT_ROOT / "data" / "speech_commands"
-OUTPUT_DIR = PROJECT_ROOT / "outputs"
-RUN_DIR = PROJECT_ROOT / "runs" / "speech_transformer"
+DATA_DIR = SPEECH_DATA_DIR
+OUTPUT_DIR = OUTPUTS_DIR
+RUN_DIR = SPEECH_RUN_DIR
 
 LABEL_TO_INDEX = {
     "go": 0,
