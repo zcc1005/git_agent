@@ -1,0 +1,18 @@
+{
+  "go": {
+    "index": 0,
+    "meaning": "开始检测"
+  },
+  "stop": {
+    "index": 1,
+    "meaning": "停止检测"
+  },
+  "yes": {
+    "index": 2,
+    "meaning": "确认报警"
+  },
+  "no": {
+    "index": 3,
+    "meaning": "取消报警"
+  }
+}

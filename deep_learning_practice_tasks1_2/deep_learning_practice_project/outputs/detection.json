@@ -1,0 +1,64 @@
+{
+  "status": "detected",
+  "timestamp": "2026-07-06 11:15:39",
+  "source": "F:\\desk\\乱七八糟的作业2026\\深度学习实践\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260706_111534_975245_1736-boardcamera_iron_ore_canga3_png.rf.5148a42025ded8026272560a521ae747.jpg",
+  "model_path": "F:\\desk\\乱七八糟的作业2026\\深度学习实践\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\runs\\yolo\\yiwu_yolov8n\\weights\\best.pt",
+  "num_images": 1,
+  "num_detections": 4,
+  "has_yiwu": true,
+  "objects": [
+    {
+      "image": "F:\\desk\\乱七八糟的作业2026\\深度学习实践\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260706_111534_975245_1736-boardcamera_iron_ore_canga3_png.rf.5148a42025ded8026272560a521ae747.jpg",
+      "class_id": 0,
+      "class": "yiwu",
+      "confidence": 0.9135,
+      "bbox_xyxy": [
+        522.8,
+        147.22,
+        779.02,
+        411.79
+      ],
+      "area": 67787.63
+    },
+    {
+      "image": "F:\\desk\\乱七八糟的作业2026\\深度学习实践\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260706_111534_975245_1736-boardcamera_iron_ore_canga3_png.rf.5148a42025ded8026272560a521ae747.jpg",
+      "class_id": 0,
+      "class": "yiwu",
+      "confidence": 0.6172,
+      "bbox_xyxy": [
+        0.08,
+        209.5,
+        143.99,
+        452.59
+      ],
+      "area": 34982.47
+    },
+    {
+      "image": "F:\\desk\\乱七八糟的作业2026\\深度学习实践\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260706_111534_975245_1736-boardcamera_iron_ore_canga3_png.rf.5148a42025ded8026272560a521ae747.jpg",
+      "class_id": 0,
+      "class": "yiwu",
+      "confidence": 0.615,
+      "bbox_xyxy": [
+        908.63,
+        323.49,
+        1023.9,
+        465.21
+      ],
+      "area": 16335.78
+    },
+    {
+      "image": "F:\\desk\\乱七八糟的作业2026\\深度学习实践\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260706_111534_975245_1736-boardcamera_iron_ore_canga3_png.rf.5148a42025ded8026272560a521ae747.jpg",
+      "class_id": 0,
+      "class": "yiwu",
+      "confidence": 0.3254,
+      "bbox_xyxy": [
+        0.42,
+        391.34,
+        205.24,
+        537.43
+      ],
+      "area": 29922.48
+    }
+  ],
+  "visualization_dir": "F:\\desk\\乱七八糟的作业2026\\深度学习实践\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\detections_vis"
+}

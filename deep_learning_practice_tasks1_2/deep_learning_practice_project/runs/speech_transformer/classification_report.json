@@ -1,0 +1,35 @@
+{
+  "accuracy": 0.951784,
+  "labels": [
+    "go",
+    "stop",
+    "yes",
+    "no"
+  ],
+  "per_class": {
+    "go": {
+      "precision": 0.944882,
+      "recall": 0.923077,
+      "f1": 0.933852,
+      "support": 260
+    },
+    "stop": {
+      "precision": 0.963855,
+      "recall": 0.97561,
+      "f1": 0.969697,
+      "support": 246
+    },
+    "yes": {
+      "precision": 0.98062,
+      "recall": 0.969349,
+      "f1": 0.974952,
+      "support": 261
+    },
+    "no": {
+      "precision": 0.92029,
+      "recall": 0.940741,
+      "f1": 0.930403,
+      "support": 270
+    }
+  }
+}
