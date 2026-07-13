@@ -21,7 +21,9 @@ ENV/
 .ipynb_checkpoints/
 
 # Deep learning datasets and generated artifacts
-deep_learning_practice_tasks1_2/deep_learning_practice_project/data/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/data/*
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/data/yolo_yiwu/
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/data/yolo_yiwu/**
 deep_learning_practice_tasks1_2/deep_learning_practice_project/outputs/
 deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/
 
@@ -34,6 +36,7 @@ deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/
 *.h5
 *.pkl
 *.joblib
+*.cache
 
 # Archives and downloaded datasets
 *.zip

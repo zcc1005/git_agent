@@ -1,0 +1,11 @@
+path: F:/desk/乱七八糟的作业2026/深度学习实践/deep_learning_practice_tasks1_2/deep_learning_practice_project/data/yolo_yiwu
+train: images/train
+val: images/val
+test: images/test
+nc: 5
+names:
+  0: unknown
+  1: stone
+  2: plastic
+  3: metal
+  4: wood
