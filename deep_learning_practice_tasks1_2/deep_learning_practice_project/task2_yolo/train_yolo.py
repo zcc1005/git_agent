@@ -13,6 +13,7 @@ from pathlib import Path
 from ultralytics import YOLO
 
 from task2_yolo.check_yolo_dataset import audit_dataset, print_report
+from project_config import YOLO_RUN_NAME
 from task2_yolo.yolo_config import RUN_DIR, YOLO_DATA_DIR
 
 
@@ -78,12 +79,12 @@ def main() -> None:
         default="yolov8s.pt",
         help="Model checkpoint, for example yolov8n.pt or yolov8s.pt.",
     )
-    parser.add_argument("--epochs", type=int, default=150)
+    parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--imgsz", type=int, default=800)
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--device", type=str, default=None, help="Example: 0 or cpu.")
     parser.add_argument("--project", type=Path, default=RUN_DIR)
-    parser.add_argument("--name", type=str, default="yiwu_yolov8s")
+    parser.add_argument("--name", type=str, default=YOLO_RUN_NAME)
     parser.add_argument(
         "--exist-ok",
         action="store_true",

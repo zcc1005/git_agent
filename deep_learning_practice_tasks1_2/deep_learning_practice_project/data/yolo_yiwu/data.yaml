@@ -1,11 +1,9 @@
-# 每个 txt 的第一列必须严格使用以下 0-4 类别 ID；train/val/test 映射必须一致。
 train: images/train
 val: images/val
 test: images/test
-nc: 5
+nc: 4
 names:
-  0: unknown
-  1: stone
-  2: plastic
-  3: metal
-  4: wood
+  0: stone
+  1: plastic
+  2: metal
+  3: wood

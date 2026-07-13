@@ -239,9 +239,22 @@ def parse_args() -> argparse.Namespace:
         dest="yolo_model",
         type=Path,
         default=DEFAULT_YOLO_MODEL,
-        help="YOLO best.pt 路径，默认 runs/yolo/yiwu_yolov8n/weights/best.pt",
+        help="YOLO best.pt 路径，默认 runs/yolo/yiwu_yolov8s_4class/weights/best.pt",
     )
-    parser.add_argument("--conf", type=float, default=0.15, help="YOLO 置信度阈值")
+    parser.add_argument(
+        "--conf",
+        type=float,
+        default=0.15,
+        help="YOLO 最低检测阈值，低于该值忽略",
+    )
+    parser.add_argument(
+        "--known-conf",
+        "--known_conf",
+        dest="known_conf",
+        type=float,
+        default=0.40,
+        help="已知类别阈值，conf 到该值之间输出 unknown",
+    )
     parser.add_argument(
         "--adapter_dir",
         "--lora_adapter",
@@ -329,6 +342,7 @@ def main() -> None:
         model_path=yolo_model,
         output_json=DETECTION_JSON,
         conf=args.conf,
+        known_conf=args.known_conf,
     )
     print_detection_summary(DETECTION_JSON)
 

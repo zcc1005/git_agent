@@ -31,7 +31,7 @@ def env_text(env_name: str, default: str) -> str:
 
 YOLO_DATA_DIR = env_path("YOLO_DATA_DIR", DATA_DIR / "yolo_yiwu")
 YOLO_RUN_DIR = env_path("YOLO_RUN_DIR", RUNS_DIR / "yolo")
-YOLO_RUN_NAME = env_text("YOLO_RUN_NAME", "yiwu_yolov8n")
+YOLO_RUN_NAME = env_text("YOLO_RUN_NAME", "yiwu_yolov8s_4class")
 YOLO_MODEL_PATH = env_path(
     "YOLO_MODEL_PATH",
     YOLO_RUN_DIR / YOLO_RUN_NAME / "weights" / "best.pt",

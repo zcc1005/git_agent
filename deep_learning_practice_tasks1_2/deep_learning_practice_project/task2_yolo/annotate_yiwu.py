@@ -9,12 +9,14 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import argparse
+import shutil
 from pathlib import Path
 from typing import List, Tuple
 
 import cv2
 import numpy as np
 
+from project_config import DATA_DIR
 from task2_yolo.yolo_config import (
     CLASS_DISPLAY_NAMES,
     CLASS_ID_TO_NAME,
@@ -26,8 +28,9 @@ from task2_yolo.yolo_config import (
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 Box = Tuple[int, int, int, int, int]
+UNKNOWN_EVAL_CLASS_ID = -1
 CLASS_COLORS = {
-    CLASS_NAME_TO_ID["unknown"]: (180, 180, 180),
+    UNKNOWN_EVAL_CLASS_ID: (180, 180, 180),
     CLASS_NAME_TO_ID["stone"]: (64, 64, 255),
     CLASS_NAME_TO_ID["plastic"]: (0, 200, 255),
     CLASS_NAME_TO_ID["metal"]: (255, 128, 0),
@@ -38,7 +41,7 @@ KEY_TO_CLASS_ID = {
     ord("2"): CLASS_NAME_TO_ID["plastic"],
     ord("3"): CLASS_NAME_TO_ID["metal"],
     ord("4"): CLASS_NAME_TO_ID["wood"],
-    ord("5"): CLASS_NAME_TO_ID["unknown"],
+    ord("5"): UNKNOWN_EVAL_CLASS_ID,
 }
 
 
@@ -51,7 +54,9 @@ def imread_unicode(path: Path):
 
 
 def class_label(class_id: int) -> str:
-    name = CLASS_ID_TO_NAME.get(class_id, "unknown")
+    if class_id == UNKNOWN_EVAL_CLASS_ID:
+        return "eval:未知异物"
+    name = CLASS_ID_TO_NAME.get(class_id, f"invalid-{class_id}")
     display = CLASS_DISPLAY_NAMES.get(name, name)
     return f"{class_id}:{display}"
 
@@ -64,10 +69,11 @@ class YoloAnnotator:
         start: int = 0,
         max_window_w: int = 1280,
         max_window_h: int = 800,
-        review_unknown: bool = False,
+        unknown_dir: Path = DATA_DIR / "yolo_unknown_eval",
     ):
         self.data_dir = data_dir
         self.split = split
+        self.unknown_dir = unknown_dir
 
         self.image_dir = data_dir / "images" / split
         self.label_dir = data_dir / "labels" / split
@@ -79,9 +85,6 @@ class YoloAnnotator:
         self.images = sorted(
             [p for p in self.image_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS]
         )
-
-        if review_unknown:
-            self.images = [p for p in self.images if self.needs_unknown_review(p)]
 
         if not self.images:
             raise RuntimeError(f"No images found: {self.image_dir}")
@@ -100,7 +103,7 @@ class YoloAnnotator:
         self.image = None
         self.win_name = (
             "Annotate foreign objects: 1 stone | 2 plastic | 3 metal | "
-            "4 wood | 5 unknown | drag | right-click reclassify | s save | "
+            "4 wood | 5 unknown(eval only) | drag | right-click reclassify | s save | "
             "n none | u undo | r reset | q quit"
         )
 
@@ -113,7 +116,8 @@ class YoloAnnotator:
         for class_id, name in enumerate(CLASS_NAMES):
             print(f"  {class_id}: {CLASS_DISPLAY_NAMES.get(name, name)}")
         print("Controls:")
-        print("  1-5: select object type")
+        print("  1-4: select known type (saved as YOLO class IDs 0-3)")
+        print("  5: select unknown; saving moves the whole image to unknown_eval")
         print("  Mouse drag: draw a box using the selected type")
         print("  Right click inside a box: change that box to the selected type")
         print("  s: save current image and go next")
@@ -124,23 +128,6 @@ class YoloAnnotator:
 
     def yolo_label_path(self, image_path: Path) -> Path:
         return self.label_dir / f"{image_path.stem}.txt"
-
-    def needs_unknown_review(self, image_path: Path) -> bool:
-        """Select missing, malformed, or class-0 labels for focused reclassification."""
-        label_path = self.yolo_label_path(image_path)
-        if not label_path.exists():
-            return True
-        for line in label_path.read_text(encoding="utf-8").splitlines():
-            parts = line.strip().split()
-            if not parts:
-                continue
-            try:
-                class_id = int(parts[0])
-            except (ValueError, IndexError):
-                return True
-            if len(parts) != 5 or class_id == CLASS_NAME_TO_ID["unknown"]:
-                return True
-        return False
 
     def load_existing_boxes(self, image_path: Path, w: int, h: int) -> List[Box]:
         label_path = self.yolo_label_path(image_path)
@@ -161,7 +148,8 @@ class YoloAnnotator:
             cls, xc, yc, bw, bh = map(float, parts)
             class_id = int(cls)
             if class_id not in CLASS_ID_TO_NAME:
-                class_id = CLASS_NAMES.index("unknown")
+                print(f"Skipped invalid class ID {class_id}: {label_path}")
+                continue
 
             x1 = int((xc - bw / 2) * w)
             y1 = int((yc - bh / 2) * h)
@@ -175,6 +163,9 @@ class YoloAnnotator:
     def save_boxes(self, image_path: Path, w: int, h: int):
         label_path = self.yolo_label_path(image_path)
         lines = []
+        contains_unknown = any(
+            class_id == UNKNOWN_EVAL_CLASS_ID for class_id, *_ in self.boxes
+        )
 
         for class_id, x1, y1, x2, y2 in self.boxes:
             x1, x2 = sorted(
@@ -198,10 +189,36 @@ class YoloAnnotator:
             bw = (x2 - x1) / w
             bh = (y2 - y1) / h
 
-            lines.append(f"{class_id} {xc:.6f} {yc:.6f} {bw:.6f} {bh:.6f}")
+            if contains_unknown:
+                # unknown_eval retains the original five-class mapping:
+                # 0 unknown, 1 stone, 2 plastic, 3 metal, 4 wood.
+                saved_class_id = 0 if class_id == UNKNOWN_EVAL_CLASS_ID else class_id + 1
+            else:
+                saved_class_id = class_id
+            lines.append(
+                f"{saved_class_id} {xc:.6f} {yc:.6f} {bw:.6f} {bh:.6f}"
+            )
 
-        label_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-        print(f"Saved: {label_path}, boxes={len(lines)}")
+        label_text = "\n".join(lines) + ("\n" if lines else "")
+        if contains_unknown:
+            image_target = self.unknown_dir / "images" / self.split / image_path.name
+            label_target = self.unknown_dir / "labels" / self.split / label_path.name
+            if image_target.exists() or label_target.exists():
+                raise RuntimeError(
+                    f"unknown_eval 中已存在同名文件，请先检查：{image_path.name}"
+                )
+            image_target.parent.mkdir(parents=True, exist_ok=True)
+            label_target.parent.mkdir(parents=True, exist_ok=True)
+            label_target.write_text(label_text, encoding="utf-8")
+            shutil.move(str(image_path), str(image_target))
+            label_path.unlink(missing_ok=True)
+            print(
+                f"Moved to unknown_eval: {image_target}, boxes={len(lines)} "
+                "(excluded from four-class training)"
+            )
+        else:
+            label_path.write_text(label_text, encoding="utf-8")
+            print(f"Saved: {label_path}, boxes={len(lines)}")
 
     def image_to_display(self, img):
         h, w = img.shape[:2]
@@ -361,9 +378,10 @@ def main():
     parser.add_argument("--split", type=str, default="train", choices=["train", "val", "test"])
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument(
-        "--review-unknown",
-        action="store_true",
-        help="只查看缺标签、坏标签或含 unknown(0) 框的图片",
+        "--unknown-dir",
+        type=Path,
+        default=DATA_DIR / "yolo_unknown_eval",
+        help="含 unknown 框的整图归档目录",
     )
     args = parser.parse_args()
 
@@ -371,7 +389,7 @@ def main():
         args.data_dir,
         args.split,
         args.start,
-        review_unknown=args.review_unknown,
+        unknown_dir=args.unknown_dir,
     ).run()
 
 

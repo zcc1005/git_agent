@@ -77,13 +77,19 @@ python task2_yolo/prepare_yolo_dataset.py
 ```bash
 python task2_yolo/annotate_yiwu.py --split train
 python task2_yolo/annotate_yiwu.py --split val
+python task2_yolo/annotate_yiwu.py --split test
 ```
 
-如果旧验证集的框仍然全是 `unknown(0)`，可只复查这些图片。先按 `1-5` 选择类别，再在已有框内单击鼠标右键即可改类，最后按 `s` 保存：
+当前训练类别为四类，标注快捷键为：`1=stone`、`2=plastic`、`3=metal`、`4=wood`；标签文件中自动保存为 YOLO 要求的连续 ID `0-3`。如果遇到未知异物，按 `5` 后画框并保存，程序会把整张图片及全部框自动移入 `data/yolo_unknown_eval`，不让未知物体作为背景混入训练集。
+
+旧五分类数据只需执行一次自动迁移，不需要重新画框：
 
 ```bash
-python task2_yolo/annotate_yiwu.py --split val --review-unknown
+python task2_yolo/migrate_to_four_classes.py
+python task2_yolo/migrate_to_four_classes.py --apply
 ```
+
+第一条命令只检查，第二条才执行。旧 `unknown(0)` 图片和原标签会移到 `data/yolo_unknown_eval`，不参与四分类训练；其余类别 ID 自动减 1，框坐标保持不变。
 
 训练前检查路径、缺失标签、坐标范围和每个划分的类别分布：
 
@@ -103,6 +109,12 @@ python task2_yolo/train_yolo.py --model yolov8s.pt --epochs 150 --imgsz 800 --ba
 
 ```bash
 python task2_yolo/detect_yolo.py --source data/yolo_yiwu/images/test
+```
+
+检测采用双阈值：低于 `0.15` 当作背景，`0.15-0.40` 输出 `unknown`，不低于 `0.40` 输出四个已知类别。可通过 `--conf` 和 `--known-conf` 调整：
+
+```bash
+python task2_yolo/detect_yolo.py --source data/yolo_yiwu/images/test --conf 0.15 --known-conf 0.40
 ```
 
 调试时可忽略语音命令直接检测：
