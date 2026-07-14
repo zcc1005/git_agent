@@ -9,6 +9,7 @@ from typing import Any, Dict
 from flask import Flask, jsonify, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
 
+from extract_video_frames import save_uploaded_video
 from main_pipeline import (
     ALARM_REPORT,
     COMMAND_MEANINGS,
@@ -29,14 +30,17 @@ from main_pipeline import (
 )
 from task2_yolo.detect_yolo import detect_yiwu, make_skipped_json, read_command, should_start_detection
 from task3_alarm.generate_alarm_qwen_lora import generate_alarm_report
+from video_detection import detect_video_foreign_objects, parse_video_start_time
 
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024
 pipeline_lock = threading.Lock()
 
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 UPLOAD_DIR = OUTPUTS_DIR / "web_inputs"
 ACTIVE_ALARM_REPORT = OUTPUTS_DIR / "alarm_report_active.txt"
+VIDEO_DETECTIONS_DIR = OUTPUTS_DIR / "video_detections"
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
@@ -111,6 +115,33 @@ def path_to_output_url(path: Path | None) -> str | None:
         return None
     rel = path.resolve().relative_to(OUTPUTS_DIR.resolve()).as_posix()
     return f"/outputs/{rel}"
+
+
+def build_video_response(result: Dict[str, Any]) -> Dict[str, Any]:
+    events = []
+    for event in result.get("events", []):
+        event_data = dict(event)
+        key_frame = PROJECT_ROOT / str(event_data["key_frame"])
+        event_data["key_frame_url"] = path_to_output_url(key_frame)
+        events.append(event_data)
+
+    return {
+        "status": result["status"],
+        "video": result["video"],
+        "video_start_time": result["video_start_time"],
+        "video_end_time": result["video_end_time"],
+        "duration_seconds": result["duration_seconds"],
+        "source_fps": result["source_fps"],
+        "sample_fps": result["sample_fps"],
+        "sampled_frames": result["sampled_frames"],
+        "positive_frames": result["positive_frames"],
+        "saved_images": result["saved_images"],
+        "has_foreign_object": result["has_foreign_object"],
+        "num_events": result["num_events"],
+        "class_counts": result["class_counts"],
+        "events": events,
+        "result_json": result["result_json"],
+    }
 
 
 def build_response(image_path: Path | None = None) -> Dict[str, Any]:
@@ -278,6 +309,35 @@ def api_run():
             save_active_alarm_report()
 
             return jsonify({"ok": True, **build_response(image_path)})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.post("/api/video-detect")
+def api_video_detect():
+    try:
+        uploaded_file = request.files.get("video")
+        if uploaded_file is None or not uploaded_file.filename:
+            raise ValueError("请先选择需要检测的视频。")
+
+        video_start = parse_video_start_time(request.form.get("video_start_time", ""))
+        sample_fps = float(request.form.get("fps", "2"))
+        conf = float(request.form.get("conf", "0.15"))
+
+        with pipeline_lock:
+            video_path = save_uploaded_video(uploaded_file)
+            output_dir = VIDEO_DETECTIONS_DIR / video_path.stem
+            result = detect_video_foreign_objects(
+                video_path=video_path,
+                model_path=DEFAULT_YOLO_MODEL,
+                output_dir=output_dir,
+                video_start=video_start,
+                sample_fps=sample_fps,
+                conf=conf,
+            )
+        return jsonify({"ok": True, "video_detection": build_video_response(result)})
+    except (ValueError, FileNotFoundError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
 
