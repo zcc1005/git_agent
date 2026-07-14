@@ -1,0 +1,10 @@
+{
+  "command": "go",
+  "meaning": "开始检测",
+  "confidence": 1.0,
+  "start_detection": true,
+  "confirm_alarm": false,
+  "cancel_alarm": false,
+  "timestamp": "2026-07-13 16:52:31",
+  "source": "manual"
+}

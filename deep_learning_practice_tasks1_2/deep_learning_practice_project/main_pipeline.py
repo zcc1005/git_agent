@@ -9,7 +9,15 @@ from pathlib import Path
 from typing import Any, Dict
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+from project_config import (
+    ALARM_ADAPTER_DIR,
+    PROJECT_ROOT,
+    QWEN_MODEL_NAME,
+    SPEECH_CKPT_PATH,
+    YOLO_MODEL_PATH,
+    resolve_project_path,
+)
+
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -28,16 +36,10 @@ MIC_COMMAND_WAV = PROJECT_ROOT / "outputs" / "mic_command.wav"
 DETECTION_JSON = PROJECT_ROOT / "outputs" / "detection.json"
 ALARM_REPORT = PROJECT_ROOT / "outputs" / "alarm_report.txt"
 DEFAULT_SOURCE = PROJECT_ROOT / "data" / "yolo_yiwu" / "images" / "test"
-DEFAULT_YOLO_MODEL = PROJECT_ROOT / "runs" / "yolo" / "foreign_objects_yolov8n" / "weights" / "best.pt"
-DEFAULT_SPEECH_CKPT = PROJECT_ROOT / "runs" / "speech_transformer" / "best_model.pt"
-DEFAULT_ADAPTER_DIR = PROJECT_ROOT / "outputs" / "task3_alarm" / "qwen_alarm_lora"
-DEFAULT_QWEN_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
-
-
-def resolve_project_path(path: Path) -> Path:
-    if path.is_absolute():
-        return path
-    return PROJECT_ROOT / path
+DEFAULT_YOLO_MODEL = YOLO_MODEL_PATH
+DEFAULT_SPEECH_CKPT = SPEECH_CKPT_PATH
+DEFAULT_ADAPTER_DIR = ALARM_ADAPTER_DIR
+DEFAULT_QWEN_MODEL = QWEN_MODEL_NAME
 
 
 def display_path(path: Path) -> str:
@@ -237,9 +239,22 @@ def parse_args() -> argparse.Namespace:
         dest="yolo_model",
         type=Path,
         default=DEFAULT_YOLO_MODEL,
-        help="YOLO best.pt 路径，默认 runs/yolo/yiwu_yolov8n/weights/best.pt",
+        help="YOLO best.pt 路径，默认 runs/yolo/yiwu_yolov8s_4class/weights/best.pt",
     )
-    parser.add_argument("--conf", type=float, default=0.15, help="YOLO 置信度阈值")
+    parser.add_argument(
+        "--conf",
+        type=float,
+        default=0.15,
+        help="YOLO 最低检测阈值，低于该值忽略",
+    )
+    parser.add_argument(
+        "--known-conf",
+        "--known_conf",
+        dest="known_conf",
+        type=float,
+        default=0.40,
+        help="已知类别阈值，conf 到该值之间输出 unknown",
+    )
     parser.add_argument(
         "--adapter_dir",
         "--lora_adapter",
@@ -327,6 +342,7 @@ def main() -> None:
         model_path=yolo_model,
         output_json=DETECTION_JSON,
         conf=args.conf,
+        known_conf=args.known_conf,
     )
     print_detection_summary(DETECTION_JSON)
 

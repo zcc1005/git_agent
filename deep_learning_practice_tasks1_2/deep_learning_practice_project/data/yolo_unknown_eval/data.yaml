@@ -1,0 +1,10 @@
+train: images/train
+val: images/val
+test: images/test
+nc: 5
+names:
+  0: unknown
+  1: stone
+  2: plastic
+  3: metal
+  4: wood
