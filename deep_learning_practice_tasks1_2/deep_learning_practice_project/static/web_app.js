@@ -19,9 +19,30 @@ const alarmPath = document.getElementById("alarmPath");
 const progressFill = document.getElementById("progressFill");
 const progressText = document.getElementById("progressText");
 const progressPercent = document.getElementById("progressPercent");
+const modeTabs = document.querySelectorAll(".mode-tab");
+const modePanels = document.querySelectorAll(".mode-panel");
+const videoForm = document.getElementById("videoForm");
+const videoInput = document.getElementById("videoInput");
+const videoPreview = document.getElementById("videoPreview");
+const videoFileHint = document.getElementById("videoFileHint");
+const videoStartTime = document.getElementById("videoStartTime");
+const videoRunButton = document.getElementById("videoRunButton");
+const videoProgressFill = document.getElementById("videoProgressFill");
+const videoProgressText = document.getElementById("videoProgressText");
+const videoProgressPercent = document.getElementById("videoProgressPercent");
+const videoEventCount = document.getElementById("videoEventCount");
+const videoPositiveFrames = document.getElementById("videoPositiveFrames");
+const videoSampledFrames = document.getElementById("videoSampledFrames");
+const videoClassSummary = document.getElementById("videoClassSummary");
+const videoResultMessage = document.getElementById("videoResultMessage");
+const videoEventRows = document.getElementById("videoEventRows");
+const videoGallery = document.getElementById("videoGallery");
+const videoResultPath = document.getElementById("videoResultPath");
 
 let commandMode = "manual";
 let progressTimer = null;
+let videoProgressTimer = null;
+let videoPreviewUrl = null;
 
 function setProgress(percent, text, isError = false) {
   const value = Math.max(0, Math.min(100, Math.round(percent)));
@@ -266,4 +287,148 @@ micButton.addEventListener("click", async () => {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   await runPipeline();
+});
+
+modeTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    const selectedMode = tab.dataset.mode;
+    modeTabs.forEach((item) => item.classList.toggle("active", item === tab));
+    modePanels.forEach((panel) => {
+      panel.classList.toggle("active", panel.id === `${selectedMode}Mode`);
+    });
+  });
+});
+
+function setVideoProgress(percent, text, isError = false) {
+  const value = Math.max(0, Math.min(100, Math.round(percent)));
+  videoProgressFill.style.width = `${value}%`;
+  videoProgressFill.classList.toggle("error", isError);
+  videoProgressText.textContent = text;
+  videoProgressPercent.textContent = `${value}%`;
+}
+
+function stopVideoProgress() {
+  if (videoProgressTimer !== null) {
+    clearInterval(videoProgressTimer);
+    videoProgressTimer = null;
+  }
+}
+
+function startVideoProgress() {
+  stopVideoProgress();
+  let current = 8;
+  setVideoProgress(current, "正在上传视频并逐帧检测");
+  videoProgressTimer = setInterval(() => {
+    current = Math.min(94, current + (current < 60 ? 2 : 1));
+    setVideoProgress(current, "正在上传视频并逐帧检测");
+  }, 1000);
+}
+
+function appendCell(row, text) {
+  const cell = document.createElement("td");
+  cell.textContent = text;
+  row.appendChild(cell);
+}
+
+function updateVideoResult(data) {
+  stopVideoProgress();
+  setVideoProgress(100, "视频检测完成");
+  videoEventCount.textContent = String(data.num_events || 0);
+  videoPositiveFrames.textContent = String(data.positive_frames || 0);
+  videoSampledFrames.textContent = String(data.sampled_frames || 0);
+  videoClassSummary.textContent = formatClassCounts(data.class_counts).replaceAll("，", " / ");
+  videoResultPath.textContent = data.result_json || "";
+  videoEventRows.replaceChildren();
+  videoGallery.replaceChildren();
+
+  if (!data.has_foreign_object) {
+    videoResultMessage.className = "video-result-message no-detection";
+    videoResultMessage.textContent = `检测完成：共按 ${data.sample_fps} FPS 检测 ${data.sampled_frames} 帧，未发现异物。`;
+    const placeholder = document.createElement("div");
+    placeholder.className = "gallery-placeholder";
+    placeholder.textContent = "本次没有检测到异物，因此没有保存图片";
+    videoGallery.appendChild(placeholder);
+    return;
+  }
+
+  videoResultMessage.className = "video-result-message";
+  videoResultMessage.textContent = `检测到 ${data.num_events} 个异物出现时间段，共保存 ${data.saved_images} 张命中帧。表中的数量是该时间段内单帧最大同时异物数。`;
+
+  data.events.forEach((event) => {
+    const row = document.createElement("tr");
+    appendCell(row, String(event.event_id));
+    appendCell(row, `${event.start_video_time} 至 ${event.end_video_time}`);
+    appendCell(row, `${event.start_real_time} 至 ${event.end_real_time}`);
+    appendCell(row, String(event.object_count));
+    appendCell(row, formatClassCounts(event.class_counts));
+    appendCell(row, Number(event.max_confidence).toFixed(2));
+    videoEventRows.appendChild(row);
+
+    const figure = document.createElement("figure");
+    const image = document.createElement("img");
+    image.src = `${event.key_frame_url}?t=${Date.now()}`;
+    image.alt = `异物事件 ${event.event_id} 关键帧`;
+    const caption = document.createElement("figcaption");
+    caption.textContent = `时间段 ${event.event_id} · ${event.start_real_time} 至 ${event.end_real_time} · ${formatClassCounts(event.class_counts)}`;
+    figure.append(image, caption);
+    videoGallery.appendChild(figure);
+  });
+}
+
+function showVideoError(message) {
+  stopVideoProgress();
+  setVideoProgress(100, "视频检测失败", true);
+  videoResultMessage.className = "video-result-message no-detection";
+  videoResultMessage.textContent = message;
+  setStatus("出错", "error");
+}
+
+const localNow = new Date();
+localNow.setMinutes(localNow.getMinutes() - localNow.getTimezoneOffset());
+videoStartTime.value = localNow.toISOString().slice(0, 19);
+
+videoInput.addEventListener("change", () => {
+  const file = videoInput.files?.[0];
+  if (videoPreviewUrl) {
+    URL.revokeObjectURL(videoPreviewUrl);
+    videoPreviewUrl = null;
+  }
+  if (!file) {
+    videoPreview.style.display = "none";
+    videoFileHint.textContent = "上传后只保存检测到异物的带框图片。";
+    return;
+  }
+  videoPreviewUrl = URL.createObjectURL(file);
+  videoPreview.src = videoPreviewUrl;
+  videoPreview.style.display = "block";
+  videoFileHint.textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB`;
+});
+
+videoForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!videoInput.files || videoInput.files.length === 0) {
+    showVideoError("请先选择需要检测的视频。");
+    return;
+  }
+
+  const body = new FormData(videoForm);
+  videoRunButton.disabled = true;
+  setStatus("视频检测中", "running");
+  videoResultMessage.className = "video-result-message";
+  videoResultMessage.textContent = "视频较长时需要等待，检测过程中页面请保持打开。";
+  startVideoProgress();
+
+  try {
+    const response = await fetch("/api/video-detect", { method: "POST", body });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "视频检测失败");
+    }
+    updateVideoResult(data.video_detection);
+    setStatus("完成");
+  } catch (error) {
+    showVideoError(error.message);
+  } finally {
+    videoRunButton.disabled = false;
+  }
 });
