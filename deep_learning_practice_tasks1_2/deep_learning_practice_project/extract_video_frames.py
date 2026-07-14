@@ -17,10 +17,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from task2_yolo.yolo_config import YOLO_DATA_DIR
-
-
 UPLOAD_DIR = PROJECT_ROOT / "outputs" / "uploaded_videos"
+EXTRACTED_FRAMES_DIR = PROJECT_ROOT / "outputs" / "extracted_frames"
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".mpeg", ".mpg"}
 
 
@@ -253,7 +251,11 @@ def extract_frames_from_video(
     return generated
 
 
-def batch_extract_folder_videos(video_folder: Path, split_name: str, frame_fps: float = 0.5) -> list[Path]:
+def batch_extract_folder_videos(
+    video_folder: Path,
+    output_dir: Path = EXTRACTED_FRAMES_DIR,
+    frame_fps: float = 0.5,
+) -> list[Path]:
     """Recursively extract frames from all supported videos in a folder."""
     if not video_folder.is_dir():
         print(f"Video directory does not exist: {video_folder}")
@@ -268,7 +270,7 @@ def batch_extract_folder_videos(video_folder: Path, split_name: str, frame_fps: 
         print(f"No supported videos found in: {video_folder}")
         return []
 
-    target_dir = YOLO_DATA_DIR / "images" / split_name
+    target_dir = output_dir / _safe_filename(video_folder.name)
     print(f"Found {len(videos)} video(s). Extracting frames to {target_dir}")
     generated: list[Path] = []
     for video in videos:
@@ -313,9 +315,8 @@ form,#result{margin-top:24px;padding:24px;border:1px solid #d9e2e7;border-radius
 label{display:block;margin:16px 0 8px;font-weight:700}input,select,button{font:inherit}input,select{width:100%;box-sizing:border-box;padding:10px;border:1px solid #aab7c1;border-radius:6px}
 button{margin-top:22px;padding:10px 18px;border:0;border-radius:6px;color:#fff;background:#0f766e;cursor:pointer}button:disabled{opacity:.65;cursor:wait}
 #result{display:none;white-space:pre-wrap;line-height:1.65}.error{color:#b42318}
-</style></head><body><main><h1>Upload a video and extract frames</h1><p>The uploaded file is stored only in this project's outputs/uploaded_videos directory. Extracted images are written to the selected YOLO dataset split.</p>
+</style></head><body><main><h1>Upload a video and extract frames</h1><p>The uploaded file is stored in this project's outputs/uploaded_videos directory. Extracted images are written to outputs/extracted_frames.</p>
 <form id="uploadForm"><label for="video">Video file</label><input id="video" name="video" type="file" accept="video/*,.avi,.mkv,.flv,.wmv,.mpeg,.mpg" required>
-<label for="split">Dataset split</label><select id="split" name="split"><option value="train">train</option><option value="val">val</option><option value="test">test</option></select>
 <label for="fps">Frames per second</label><input id="fps" name="fps" type="number" min="0.01" step="0.01" value="0.5" required><button id="submit" type="submit">Upload and extract</button></form>
 <div id="result"></div></main><script>
 const form=document.getElementById('uploadForm'),result=document.getElementById('result'),submit=document.getElementById('submit');
@@ -332,13 +333,10 @@ form.addEventListener('submit',async(event)=>{event.preventDefault();submit.disa
             uploaded_file = request.files.get("video")
             if uploaded_file is None:
                 raise ValueError("Choose a video file before uploading.")
-            split = request.form.get("split", "train")
-            if split not in {"train", "val", "test"}:
-                raise ValueError("split must be train, val, or test.")
             fps = float(request.form.get("fps", "0.5"))
 
             video_path = save_uploaded_video(uploaded_file)
-            output_dir = YOLO_DATA_DIR / "images" / split
+            output_dir = EXTRACTED_FRAMES_DIR / video_path.stem
             frames = extract_frames_from_video(video_path, output_dir, fps)
             if not frames:
                 raise RuntimeError("No frames were created. Check the ffmpeg output above.")
@@ -361,24 +359,33 @@ def main() -> None:
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--video", type=Path, help="Path to one local video file")
     source.add_argument("--video-dir", type=Path, help="Directory containing local video files")
-    source.add_argument("--serve", action="store_true", help="Start the browser upload page")
-    parser.add_argument("--split", default="train", choices=["train", "val", "test"])
+    source.add_argument(
+        "--serve",
+        action="store_true",
+        help="Start the browser upload page (the default when no video source is given)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=EXTRACTED_FRAMES_DIR,
+        help="Directory for extracted frame images",
+    )
     parser.add_argument("--fps", type=float, default=0.5, help="Frames per second to extract")
     parser.add_argument("--no-review", action="store_true", help="Do not open the local frame review window")
     parser.add_argument("--host", default="127.0.0.1", help="Upload server host")
     parser.add_argument("--port", type=int, default=5050, help="Upload server port")
     args = parser.parse_args()
 
-    if args.serve:
+    if args.serve or (args.video is None and args.video_dir is None):
+        print(f"Open http://{args.host}:{args.port} in a browser to upload a video.")
         create_upload_app().run(host=args.host, port=args.port, debug=False)
         return
-    if args.video is None and args.video_dir is None:
-        parser.error("choose --video, --video-dir, or --serve")
 
     if args.video:
-        generated = extract_frames_from_video(args.video, YOLO_DATA_DIR / "images" / args.split, args.fps)
+        output_dir = args.output_dir / _safe_filename(args.video.stem)
+        generated = extract_frames_from_video(args.video, output_dir, args.fps)
     else:
-        generated = batch_extract_folder_videos(args.video_dir, args.split, args.fps)
+        generated = batch_extract_folder_videos(args.video_dir, args.output_dir, args.fps)
     if generated and not args.no_review:
         review_extracted_images(generated)
 
