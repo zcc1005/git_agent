@@ -9,12 +9,14 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import argparse
+import shutil
 from pathlib import Path
 from typing import List, Tuple
 
 import cv2
 import numpy as np
 
+from project_config import DATA_DIR
 from task2_yolo.yolo_config import (
     CLASS_DISPLAY_NAMES,
     CLASS_ID_TO_NAME,
@@ -26,8 +28,9 @@ from task2_yolo.yolo_config import (
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 Box = Tuple[int, int, int, int, int]
+UNKNOWN_EVAL_CLASS_ID = -1
 CLASS_COLORS = {
-    CLASS_NAME_TO_ID["unknown"]: (180, 180, 180),
+    UNKNOWN_EVAL_CLASS_ID: (180, 180, 180),
     CLASS_NAME_TO_ID["stone"]: (64, 64, 255),
     CLASS_NAME_TO_ID["plastic"]: (0, 200, 255),
     CLASS_NAME_TO_ID["metal"]: (255, 128, 0),
@@ -38,7 +41,7 @@ KEY_TO_CLASS_ID = {
     ord("2"): CLASS_NAME_TO_ID["plastic"],
     ord("3"): CLASS_NAME_TO_ID["metal"],
     ord("4"): CLASS_NAME_TO_ID["wood"],
-    ord("5"): CLASS_NAME_TO_ID["unknown"],
+    ord("5"): UNKNOWN_EVAL_CLASS_ID,
 }
 
 
@@ -51,7 +54,9 @@ def imread_unicode(path: Path):
 
 
 def class_label(class_id: int) -> str:
-    name = CLASS_ID_TO_NAME.get(class_id, "unknown")
+    if class_id == UNKNOWN_EVAL_CLASS_ID:
+        return "eval:未知异物"
+    name = CLASS_ID_TO_NAME.get(class_id, f"invalid-{class_id}")
     display = CLASS_DISPLAY_NAMES.get(name, name)
     return f"{class_id}:{display}"
 
@@ -64,9 +69,11 @@ class YoloAnnotator:
         start: int = 0,
         max_window_w: int = 1280,
         max_window_h: int = 800,
+        unknown_dir: Path = DATA_DIR / "yolo_unknown_eval",
     ):
         self.data_dir = data_dir
         self.split = split
+        self.unknown_dir = unknown_dir
 
         self.image_dir = data_dir / "images" / split
         self.label_dir = data_dir / "labels" / split
@@ -96,7 +103,8 @@ class YoloAnnotator:
         self.image = None
         self.win_name = (
             "Annotate foreign objects: 1 stone | 2 plastic | 3 metal | "
-            "4 wood | 5 unknown | drag | s save | n none | u undo | r reset | q quit"
+            "4 wood | 5 unknown(eval only) | drag | right-click reclassify | s save | "
+            "n none | u undo | r reset | q quit"
         )
 
         print(f"Dataset: {self.data_dir}")
@@ -108,8 +116,10 @@ class YoloAnnotator:
         for class_id, name in enumerate(CLASS_NAMES):
             print(f"  {class_id}: {CLASS_DISPLAY_NAMES.get(name, name)}")
         print("Controls:")
-        print("  1-5: select object type")
+        print("  1-4: select known type (saved as YOLO class IDs 0-3)")
+        print("  5: select unknown; saving moves the whole image to unknown_eval")
         print("  Mouse drag: draw a box using the selected type")
+        print("  Right click inside a box: change that box to the selected type")
         print("  s: save current image and go next")
         print("  n: save empty label for no foreign object")
         print("  u: undo last box")
@@ -138,7 +148,8 @@ class YoloAnnotator:
             cls, xc, yc, bw, bh = map(float, parts)
             class_id = int(cls)
             if class_id not in CLASS_ID_TO_NAME:
-                class_id = CLASS_NAMES.index("unknown")
+                print(f"Skipped invalid class ID {class_id}: {label_path}")
+                continue
 
             x1 = int((xc - bw / 2) * w)
             y1 = int((yc - bh / 2) * h)
@@ -152,6 +163,9 @@ class YoloAnnotator:
     def save_boxes(self, image_path: Path, w: int, h: int):
         label_path = self.yolo_label_path(image_path)
         lines = []
+        contains_unknown = any(
+            class_id == UNKNOWN_EVAL_CLASS_ID for class_id, *_ in self.boxes
+        )
 
         for class_id, x1, y1, x2, y2 in self.boxes:
             x1, x2 = sorted(
@@ -175,10 +189,36 @@ class YoloAnnotator:
             bw = (x2 - x1) / w
             bh = (y2 - y1) / h
 
-            lines.append(f"{class_id} {xc:.6f} {yc:.6f} {bw:.6f} {bh:.6f}")
+            if contains_unknown:
+                # unknown_eval retains the original five-class mapping:
+                # 0 unknown, 1 stone, 2 plastic, 3 metal, 4 wood.
+                saved_class_id = 0 if class_id == UNKNOWN_EVAL_CLASS_ID else class_id + 1
+            else:
+                saved_class_id = class_id
+            lines.append(
+                f"{saved_class_id} {xc:.6f} {yc:.6f} {bw:.6f} {bh:.6f}"
+            )
 
-        label_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-        print(f"Saved: {label_path}, boxes={len(lines)}")
+        label_text = "\n".join(lines) + ("\n" if lines else "")
+        if contains_unknown:
+            image_target = self.unknown_dir / "images" / self.split / image_path.name
+            label_target = self.unknown_dir / "labels" / self.split / label_path.name
+            if image_target.exists() or label_target.exists():
+                raise RuntimeError(
+                    f"unknown_eval 中已存在同名文件，请先检查：{image_path.name}"
+                )
+            image_target.parent.mkdir(parents=True, exist_ok=True)
+            label_target.parent.mkdir(parents=True, exist_ok=True)
+            label_target.write_text(label_text, encoding="utf-8")
+            shutil.move(str(image_path), str(image_target))
+            label_path.unlink(missing_ok=True)
+            print(
+                f"Moved to unknown_eval: {image_target}, boxes={len(lines)} "
+                "(excluded from four-class training)"
+            )
+        else:
+            label_path.write_text(label_text, encoding="utf-8")
+            print(f"Saved: {label_path}, boxes={len(lines)}")
 
     def image_to_display(self, img):
         h, w = img.shape[:2]
@@ -257,6 +297,23 @@ class YoloAnnotator:
             if abs(x2 - x1) >= 3 and abs(y2 - y1) >= 3:
                 self.boxes.append((self.current_class_id, x1, y1, x2, y2))
 
+        elif event == cv2.EVENT_RBUTTONUP:
+            original_x, original_y = self.to_original_xy(x, y)
+            candidates = []
+            for index, (_, x1, y1, x2, y2) in enumerate(self.boxes):
+                left, right = sorted((x1, x2))
+                top, bottom = sorted((y1, y2))
+                if left <= original_x <= right and top <= original_y <= bottom:
+                    candidates.append(((right - left) * (bottom - top), index))
+            if candidates:
+                _, index = min(candidates)
+                _, x1, y1, x2, y2 = self.boxes[index]
+                self.boxes[index] = (self.current_class_id, x1, y1, x2, y2)
+                print(
+                    f"Reclassified box {index + 1} as "
+                    f"{class_label(self.current_class_id)}"
+                )
+
     def handle_class_key(self, key: int) -> bool:
         if key not in KEY_TO_CLASS_ID:
             return False
@@ -320,9 +377,20 @@ def main():
     parser.add_argument("--data_dir", type=Path, default=YOLO_DATA_DIR)
     parser.add_argument("--split", type=str, default="train", choices=["train", "val", "test"])
     parser.add_argument("--start", type=int, default=0)
+    parser.add_argument(
+        "--unknown-dir",
+        type=Path,
+        default=DATA_DIR / "yolo_unknown_eval",
+        help="含 unknown 框的整图归档目录",
+    )
     args = parser.parse_args()
 
-    YoloAnnotator(args.data_dir, args.split, args.start).run()
+    YoloAnnotator(
+        args.data_dir,
+        args.split,
+        args.start,
+        unknown_dir=args.unknown_dir,
+    ).run()
 
 
 if __name__ == "__main__":

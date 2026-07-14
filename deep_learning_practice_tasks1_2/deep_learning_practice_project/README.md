@@ -3,7 +3,7 @@
 本项目包含三个任务：
 
 - 任务一：基于 Transformer Encoder 的语音命令识别，输出 `outputs/command.json`。
-- 任务二：基于 YOLOv8n 的工业皮带单类异物检测，类别为 `yiwu`，输出 `outputs/detection.json` 和 `outputs/detections_vis/`。
+- 任务二：基于 YOLOv8 的工业皮带五类异物检测，类别为 `unknown/stone/plastic/metal/wood`，输出 `outputs/detection.json` 和 `outputs/detections_vis/`。
 - 任务三：基于 LoRA 微调 `Qwen/Qwen2.5-0.5B-Instruct`，读取 `outputs/detection.json`，生成工业报警报告 `outputs/alarm_report.txt`。
 
 ## 1. 环境安装
@@ -77,18 +77,44 @@ python task2_yolo/prepare_yolo_dataset.py
 ```bash
 python task2_yolo/annotate_yiwu.py --split train
 python task2_yolo/annotate_yiwu.py --split val
+python task2_yolo/annotate_yiwu.py --split test
+```
+
+当前训练类别为四类，标注快捷键为：`1=stone`、`2=plastic`、`3=metal`、`4=wood`；标签文件中自动保存为 YOLO 要求的连续 ID `0-3`。如果遇到未知异物，按 `5` 后画框并保存，程序会把整张图片及全部框自动移入 `data/yolo_unknown_eval`，不让未知物体作为背景混入训练集。
+
+旧五分类数据只需执行一次自动迁移，不需要重新画框：
+
+```bash
+python task2_yolo/migrate_to_four_classes.py
+python task2_yolo/migrate_to_four_classes.py --apply
+```
+
+第一条命令只检查，第二条才执行。旧 `unknown(0)` 图片和原标签会移到 `data/yolo_unknown_eval`，不参与四分类训练；其余类别 ID 自动减 1，框坐标保持不变。
+
+训练前检查路径、缺失标签、坐标范围和每个划分的类别分布：
+
+```bash
+python task2_yolo/check_yolo_dataset.py --data data/yolo_yiwu/data.yaml
 ```
 
 训练 YOLO：
 
 ```bash
-python task2_yolo/train_yolo.py --epochs 50 --imgsz 640 --batch 8
+python task2_yolo/train_yolo.py --model yolov8s.pt --epochs 150 --imgsz 800 --batch 8
 ```
+
+`train_yolo.py` 会自动执行同样的数据检查；存在缺失标签或验证集缺类时会停止，避免产生看似正常但指标无效的权重。
 
 根据任务一的 `command.json` 启动检测：
 
 ```bash
 python task2_yolo/detect_yolo.py --source data/yolo_yiwu/images/test
+```
+
+检测采用双阈值：低于 `0.15` 当作背景，`0.15-0.40` 输出 `unknown`，不低于 `0.40` 输出四个已知类别。可通过 `--conf` 和 `--known-conf` 调整：
+
+```bash
+python task2_yolo/detect_yolo.py --source data/yolo_yiwu/images/test --conf 0.15 --known-conf 0.40
 ```
 
 调试时可忽略语音命令直接检测：

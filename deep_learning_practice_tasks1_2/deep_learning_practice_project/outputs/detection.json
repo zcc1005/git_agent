@@ -1,0 +1,2792 @@
+{
+  "status": "detected",
+  "timestamp": "2026-07-13 16:52:37",
+  "source": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test",
+  "model_path": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\runs\\yolo\\yiwu_yolov8s_4class\\weights\\best.pt",
+  "thresholds": {
+    "detection_min_confidence": 0.15,
+    "known_class_min_confidence": 0.4
+  },
+  "num_images": 93,
+  "num_detections": 153,
+  "has_yiwu": true,
+  "has_foreign_object": true,
+  "class_names": [
+    "stone",
+    "plastic",
+    "metal",
+    "wood"
+  ],
+  "class_display_names": {
+    "stone": "石块异物",
+    "plastic": "塑料异物",
+    "metal": "金属异物",
+    "wood": "木块异物",
+    "unknown": "未知异物",
+    "yiwu": "未知异物"
+  },
+  "class_counts": {
+    "石块异物": 97,
+    "木块异物": 22,
+    "未知异物": 19,
+    "塑料异物": 10,
+    "金属异物": 5
+  },
+  "objects": [
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\10780-boardcamera_iron_ore_jaspilito_png.rf.441cfc108f834306ce7471bb504cce92.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8363,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1072.28,
+        259.53,
+        1279.33,
+        485.74
+      ],
+      "area": 46836.01
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\10780-boardcamera_iron_ore_jaspilito_png.rf.441cfc108f834306ce7471bb504cce92.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.4586,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        73.56,
+        235.02,
+        180.02,
+        328.62
+      ],
+      "area": 9964.32
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\10780-boardcamera_iron_ore_jaspilito_png.rf.441cfc108f834306ce7471bb504cce92.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.4454,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        79.19,
+        241.74,
+        155.68,
+        314.96
+      ],
+      "area": 5601.51
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\10837-boardcamera_iron_ore_jaspilito_png.rf.6105ebdcb8048451e8e43fb389cea542.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8511,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1037.23,
+        237.27,
+        1279.07,
+        488.41
+      ],
+      "area": 60736.72
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\10837-boardcamera_iron_ore_jaspilito_png.rf.6105ebdcb8048451e8e43fb389cea542.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.3686,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        43.62,
+        238.66,
+        125.68,
+        313.79
+      ],
+      "area": 6165.06
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\10837-boardcamera_iron_ore_jaspilito_png.rf.6105ebdcb8048451e8e43fb389cea542.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.3589,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        34.93,
+        231.44,
+        147.5,
+        328.96
+      ],
+      "area": 10977.71
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\10841-boardcamera_iron_ore_jaspilito_png.rf.2b4cfe3b9ae052319e9ba521dfa6960f.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8464,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1034.22,
+        215.66,
+        1279.39,
+        490.45
+      ],
+      "area": 67367.97
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\10841-boardcamera_iron_ore_jaspilito_png.rf.2b4cfe3b9ae052319e9ba521dfa6960f.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.4142,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        37.54,
+        236.53,
+        115.89,
+        315.06
+      ],
+      "area": 6152.51
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\10841-boardcamera_iron_ore_jaspilito_png.rf.2b4cfe3b9ae052319e9ba521dfa6960f.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.3139,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        26.8,
+        231.12,
+        145.01,
+        328.85
+      ],
+      "area": 11552.23
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11020-boardcamera_iron_ore_jaspilito_png.rf.0a8b3c66d5f3b7364f16993d65f6e7d5.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8254,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        639.38,
+        169.77,
+        1255.31,
+        486.86
+      ],
+      "area": 195305.68
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11028-boardcamera_iron_ore_jaspilito_png.rf.75dab67e1fc8b6cdc65634f966794dc9.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8285,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        638.08,
+        170.42,
+        1255.05,
+        487.04
+      ],
+      "area": 195342.35
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11129-boardcamera_iron_ore_jaspilito_png.rf.c18cb49bb319f77db55008d40820bf60.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8388,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        314.2,
+        160.1,
+        897.43,
+        479.51
+      ],
+      "area": 186288.77
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11129-boardcamera_iron_ore_jaspilito_png.rf.c18cb49bb319f77db55008d40820bf60.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8183,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        998.83,
+        51.37,
+        1270.71,
+        296.06
+      ],
+      "area": 66524.12
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11129-boardcamera_iron_ore_jaspilito_png.rf.c18cb49bb319f77db55008d40820bf60.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.5544,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        847.53,
+        106.5,
+        950.95,
+        184.26
+      ],
+      "area": 8041.38
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11139-boardcamera_iron_ore_jaspilito_png.rf.ee4fa734307a2b5f4ba25f50659bba40.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8396,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        318.25,
+        161.19,
+        897.75,
+        480.88
+      ],
+      "area": 185264.59
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11139-boardcamera_iron_ore_jaspilito_png.rf.ee4fa734307a2b5f4ba25f50659bba40.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8186,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        998.65,
+        53.47,
+        1271.1,
+        297.64
+      ],
+      "area": 66521.6
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11139-boardcamera_iron_ore_jaspilito_png.rf.ee4fa734307a2b5f4ba25f50659bba40.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.638,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        848.04,
+        106.1,
+        950.81,
+        186.0
+      ],
+      "area": 8210.68
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11226-boardcamera_iron_ore_jaspilito_png.rf.92b99189efa6e4d6ef1aa30948fe46c1.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8654,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        148.28,
+        148.44,
+        740.63,
+        470.71
+      ],
+      "area": 190893.76
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11226-boardcamera_iron_ore_jaspilito_png.rf.92b99189efa6e4d6ef1aa30948fe46c1.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8498,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        860.62,
+        48.15,
+        1135.71,
+        291.91
+      ],
+      "area": 67055.02
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11226-boardcamera_iron_ore_jaspilito_png.rf.92b99189efa6e4d6ef1aa30948fe46c1.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.4808,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        691.67,
+        94.57,
+        801.27,
+        173.68
+      ],
+      "area": 8670.99
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11346-boardcamera_iron_ore_jaspilito_png.rf.889df31566e96f78d7a4cf32320a0bb3.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8461,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        467.12,
+        70.36,
+        739.06,
+        303.12
+      ],
+      "area": 63298.03
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11346-boardcamera_iron_ore_jaspilito_png.rf.889df31566e96f78d7a4cf32320a0bb3.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8347,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        0.72,
+        153.25,
+        349.53,
+        466.93
+      ],
+      "area": 109412.59
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11346-boardcamera_iron_ore_jaspilito_png.rf.889df31566e96f78d7a4cf32320a0bb3.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7722,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        295.31,
+        100.81,
+        402.98,
+        183.93
+      ],
+      "area": 8949.1
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11346-boardcamera_iron_ore_jaspilito_png.rf.889df31566e96f78d7a4cf32320a0bb3.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.5442,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        770.87,
+        103.15,
+        855.83,
+        177.79
+      ],
+      "area": 6341.91
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11346-boardcamera_iron_ore_jaspilito_png.rf.889df31566e96f78d7a4cf32320a0bb3.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.5422,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        815.98,
+        90.29,
+        868.87,
+        140.64
+      ],
+      "area": 2662.97
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\11346-boardcamera_iron_ore_jaspilito_png.rf.889df31566e96f78d7a4cf32320a0bb3.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.4873,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        773.17,
+        105.33,
+        832.05,
+        177.4
+      ],
+      "area": 4244.01
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\13072-boardcamera_iron_ore_5_fastandfurious_png.rf.091c2f177cda25561c27e8f3dc4adf44.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.31,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1079.17,
+        212.99,
+        1204.45,
+        307.01
+      ],
+      "area": 11779.72
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1736-boardcamera_iron_ore_canga3_png.rf.5148a42025ded8026272560a521ae747.jpg",
+      "class_id": 1,
+      "class": "plastic",
+      "class_name": "塑料异物",
+      "confidence": 0.8543,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 1,
+      "predicted_class": "plastic",
+      "predicted_class_name": "塑料异物",
+      "bbox_xyxy": [
+        905.75,
+        319.13,
+        1030.19,
+        471.83
+      ],
+      "area": 19000.64
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1736-boardcamera_iron_ore_canga3_png.rf.5148a42025ded8026272560a521ae747.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8231,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        522.14,
+        145.47,
+        790.58,
+        418.64
+      ],
+      "area": 73331.59
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1736-boardcamera_iron_ore_canga3_png.rf.5148a42025ded8026272560a521ae747.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7867,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        166.15,
+        231.82,
+        441.16,
+        530.39
+      ],
+      "area": 82109.98
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1736-boardcamera_iron_ore_canga3_png.rf.5148a42025ded8026272560a521ae747.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7689,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        0.0,
+        247.76,
+        128.9,
+        451.54
+      ],
+      "area": 26268.06
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1736-boardcamera_iron_ore_canga3_png.rf.5148a42025ded8026272560a521ae747.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.716,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1016.48,
+        236.76,
+        1219.09,
+        411.6
+      ],
+      "area": 35424.18
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1736-boardcamera_iron_ore_canga3_png.rf.5148a42025ded8026272560a521ae747.jpg",
+      "class_id": 1,
+      "class": "plastic",
+      "class_name": "塑料异物",
+      "confidence": 0.4737,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 1,
+      "predicted_class": "plastic",
+      "predicted_class_name": "塑料异物",
+      "bbox_xyxy": [
+        0.56,
+        394.83,
+        210.84,
+        536.75
+      ],
+      "area": 29841.82
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1761-boardcamera_iron_ore_canga_png.rf.5cdc057a67236b78c34c6c5379817f31.jpg",
+      "class_id": 1,
+      "class": "plastic",
+      "class_name": "塑料异物",
+      "confidence": 0.9234,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 1,
+      "predicted_class": "plastic",
+      "predicted_class_name": "塑料异物",
+      "bbox_xyxy": [
+        808.14,
+        230.52,
+        1280.0,
+        504.31
+      ],
+      "area": 129193.2
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1771-boardcamera_iron_ore_canga_png.rf.b03a8d00e09442a5578391c0c7a99cf1.jpg",
+      "class_id": 1,
+      "class": "plastic",
+      "class_name": "塑料异物",
+      "confidence": 0.9582,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 1,
+      "predicted_class": "plastic",
+      "predicted_class_name": "塑料异物",
+      "bbox_xyxy": [
+        576.85,
+        231.62,
+        1138.76,
+        517.74
+      ],
+      "area": 160772.73
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1790-boardcamera_iron_ore_canga_png.rf.73ed2da290348cce9e286bf8cc29e4da.jpg",
+      "class_id": 1,
+      "class": "plastic",
+      "class_name": "塑料异物",
+      "confidence": 0.9721,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 1,
+      "predicted_class": "plastic",
+      "predicted_class_name": "塑料异物",
+      "bbox_xyxy": [
+        82.36,
+        218.6,
+        652.88,
+        501.52
+      ],
+      "area": 161410.82
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1790-boardcamera_iron_ore_canga_png.rf.73ed2da290348cce9e286bf8cc29e4da.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8455,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        831.16,
+        244.95,
+        1051.44,
+        424.52
+      ],
+      "area": 39554.0
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1790-boardcamera_iron_ore_canga_png.rf.73ed2da290348cce9e286bf8cc29e4da.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.5902,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        684.02,
+        219.3,
+        816.3,
+        342.8
+      ],
+      "area": 16336.2
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1861-boardcamera_iron_ore_canga3_png.rf.bd3d49755788a689788e9f024babe912.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7954,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        19.01,
+        288.37,
+        335.18,
+        505.85
+      ],
+      "area": 68763.28
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1861-boardcamera_iron_ore_canga3_png.rf.bd3d49755788a689788e9f024babe912.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.1634,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1072.55,
+        383.68,
+        1280.0,
+        500.48
+      ],
+      "area": 24229.62
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1885-boardcamera_iron_ore_2_png.rf.750df5f65dcc14cc743e0c6844de7caa.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8378,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        658.71,
+        263.91,
+        826.99,
+        458.19
+      ],
+      "area": 32692.34
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1885-boardcamera_iron_ore_2_png.rf.750df5f65dcc14cc743e0c6844de7caa.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8208,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1016.21,
+        97.23,
+        1262.77,
+        314.93
+      ],
+      "area": 53676.07
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1885-boardcamera_iron_ore_2_png.rf.750df5f65dcc14cc743e0c6844de7caa.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.4749,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        32.67,
+        271.69,
+        135.72,
+        348.33
+      ],
+      "area": 7897.26
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1907-boardcamera_iron_ore_canga_png.rf.5e779147fac06c9a0872e1397c13946a.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8311,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1082.06,
+        151.47,
+        1279.48,
+        372.75
+      ],
+      "area": 43684.33
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1907-boardcamera_iron_ore_canga_png.rf.5e779147fac06c9a0872e1397c13946a.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8205,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        566.56,
+        358.48,
+        824.18,
+        547.91
+      ],
+      "area": 48802.18
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1907-boardcamera_iron_ore_canga_png.rf.5e779147fac06c9a0872e1397c13946a.jpg",
+      "class_id": 1,
+      "class": "plastic",
+      "class_name": "塑料异物",
+      "confidence": 0.5761,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 1,
+      "predicted_class": "plastic",
+      "predicted_class_name": "塑料异物",
+      "bbox_xyxy": [
+        149.59,
+        379.33,
+        303.29,
+        416.63
+      ],
+      "area": 5732.36
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1907-boardcamera_iron_ore_canga_png.rf.5e779147fac06c9a0872e1397c13946a.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.3064,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 1,
+      "predicted_class": "plastic",
+      "predicted_class_name": "塑料异物",
+      "bbox_xyxy": [
+        141.22,
+        371.93,
+        341.15,
+        414.92
+      ],
+      "area": 8595.11
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1947-boardcamera_iron_ore_jaspilito_3_png.rf.3d04a809ee5b5926d943b313927006af.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8753,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        77.24,
+        141.15,
+        529.25,
+        491.5
+      ],
+      "area": 158359.76
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1951-boardcamera_iron_ore_canga_png.rf.9b1fe495901ebaa19111b48fc9db64a1.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8433,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        187.33,
+        178.84,
+        529.81,
+        429.06
+      ],
+      "area": 85694.5
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1951-boardcamera_iron_ore_canga_png.rf.9b1fe495901ebaa19111b48fc9db64a1.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.838,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        0.0,
+        216.33,
+        165.92,
+        427.7
+      ],
+      "area": 35071.8
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1951-boardcamera_iron_ore_canga_png.rf.9b1fe495901ebaa19111b48fc9db64a1.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8131,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1135.59,
+        258.1,
+        1280.0,
+        512.79
+      ],
+      "area": 36780.09
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1971-boardcamera_iron_ore_7_wood_png.rf.1a20735390e442aad8e19bd25568a77a.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7301,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        914.71,
+        144.0,
+        1005.23,
+        223.69
+      ],
+      "area": 7212.87
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1971-boardcamera_iron_ore_7_wood_png.rf.1a20735390e442aad8e19bd25568a77a.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.265,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 2,
+      "predicted_class": "metal",
+      "predicted_class_name": "金属异物",
+      "bbox_xyxy": [
+        1038.09,
+        183.92,
+        1113.48,
+        246.77
+      ],
+      "area": 4738.22
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\1971-boardcamera_iron_ore_7_wood_png.rf.1a20735390e442aad8e19bd25568a77a.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.223,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 2,
+      "predicted_class": "metal",
+      "predicted_class_name": "金属异物",
+      "bbox_xyxy": [
+        1044.96,
+        184.84,
+        1123.77,
+        262.38
+      ],
+      "area": 6111.22
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2009-boardcamera_iron_ore_canga_png.rf.4a859dbbd4a7aeb29cddca6ef942ffc3.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8248,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        161.36,
+        248.92,
+        356.29,
+        506.1
+      ],
+      "area": 50133.21
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2072-boardcamera_iron_ore_jaspilito_4_png.rf.d49e741409d80a11c97a26c8ce4eb124.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.9094,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        97.41,
+        153.17,
+        615.13,
+        469.37
+      ],
+      "area": 163706.33
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2122-boardcamera_iron_ore_jaspilito_3_png.rf.00a685a022bd826bd286e27f403bb3c2.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7962,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        213.82,
+        261.95,
+        568.18,
+        416.52
+      ],
+      "area": 54773.78
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2124-boardcamera_iron_ore_jaspilito_3_png.rf.3aa8baa3499b949a5a852ee0b4fe91a6.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7576,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        144.48,
+        261.52,
+        501.45,
+        417.33
+      ],
+      "area": 55619.82
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2216-boardcamera_iron_ore_7_wood_3_png.rf.93a61bf0008749b6c5fc10db66ca0be1.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8192,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        668.62,
+        142.23,
+        868.02,
+        307.64
+      ],
+      "area": 32980.11
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2261-boardcamera_iron_ore_things_2_png.rf.59d36d8f91dbe15fed421ef2bcd0aa72.jpg",
+      "class_id": 2,
+      "class": "metal",
+      "class_name": "金属异物",
+      "confidence": 0.9772,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 2,
+      "predicted_class": "metal",
+      "predicted_class_name": "金属异物",
+      "bbox_xyxy": [
+        896.93,
+        115.01,
+        1280.0,
+        357.86
+      ],
+      "area": 93029.88
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2261-boardcamera_iron_ore_things_2_png.rf.59d36d8f91dbe15fed421ef2bcd0aa72.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8055,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        530.94,
+        201.49,
+        777.65,
+        375.49
+      ],
+      "area": 42928.47
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2288-boardcamera_iron_ore_canga3_png.rf.38853785c35059e6f39724978a4c6ae6.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8065,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        131.55,
+        206.47,
+        376.08,
+        487.81
+      ],
+      "area": 68794.33
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2291-boardcamera_iron_ore_things_2_png.rf.1a30b9da8b882b561dfb26cdb2612a7e.jpg",
+      "class_id": 2,
+      "class": "metal",
+      "class_name": "金属异物",
+      "confidence": 0.9017,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 2,
+      "predicted_class": "metal",
+      "predicted_class_name": "金属异物",
+      "bbox_xyxy": [
+        431.01,
+        80.64,
+        1097.45,
+        357.9
+      ],
+      "area": 184774.03
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2291-boardcamera_iron_ore_things_2_png.rf.1a30b9da8b882b561dfb26cdb2612a7e.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8144,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        3.38,
+        175.97,
+        249.4,
+        375.39
+      ],
+      "area": 49061.71
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2311-boardcamera_iron_ore_things_2_png.rf.ab8e66069cd410d3481c38c7d01ab564.jpg",
+      "class_id": 2,
+      "class": "metal",
+      "class_name": "金属异物",
+      "confidence": 0.8821,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 2,
+      "predicted_class": "metal",
+      "predicted_class_name": "金属异物",
+      "bbox_xyxy": [
+        56.6,
+        71.14,
+        736.51,
+        362.78
+      ],
+      "area": 198290.12
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2357-boardcamera_iron_ore_jaspilito_2_png.rf.a47db8207c5b37b1e4ff0592777574db.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8317,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        741.75,
+        195.32,
+        981.78,
+        435.87
+      ],
+      "area": 57738.16
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2388-boardcamera_iron_ore_2_png.rf.5fa986a128184ce341de567a4de40e26.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8191,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        964.14,
+        115.98,
+        1188.92,
+        319.71
+      ],
+      "area": 45794.66
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2388-boardcamera_iron_ore_2_png.rf.5fa986a128184ce341de567a4de40e26.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.5985,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        375.97,
+        224.39,
+        542.01,
+        375.02
+      ],
+      "area": 25009.24
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2391-boardcamera_iron_ore_jaspilito_3_png.rf.356e6612228077714f80aa0e83e5bdc6.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8374,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        866.96,
+        47.06,
+        1206.11,
+        363.19
+      ],
+      "area": 107211.52
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2404-boardcamera_iron_ore_7_wood_2_png.rf.34b8aa605a39a5d7c6e6df37d13c3685.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.9356,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        160.52,
+        110.11,
+        1144.73,
+        555.32
+      ],
+      "area": 438183.54
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2406-boardcamera_iron_ore_7_wood_3_png.rf.460008f13e903a14909f0e972233be54.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.8869,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        506.73,
+        238.36,
+        1280.0,
+        719.57
+      ],
+      "area": 372105.24
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2447-boardcamera_iron_ore_7_wood_3_png.rf.1f631a7033d164d7a0c64e19dc04ea7b.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.7704,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        1.57,
+        230.92,
+        633.61,
+        559.29
+      ],
+      "area": 207549.42
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2449-boardcamera_iron_ore_7_wood_png.rf.3ed52106391945b9e0ec1e8f77b2ad2d.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.944,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        784.03,
+        99.88,
+        1280.0,
+        573.31
+      ],
+      "area": 234804.29
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2455-boardcamera_iron_ore_7_wood_3_png.rf.e6948b713add8953c5dd5893e232b4de.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.7832,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        0.0,
+        255.2,
+        434.24,
+        512.95
+      ],
+      "area": 111925.72
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2455-boardcamera_iron_ore_7_wood_3_png.rf.e6948b713add8953c5dd5893e232b4de.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.6615,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        0.0,
+        260.0,
+        433.85,
+        438.23
+      ],
+      "area": 77321.57
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2455-boardcamera_iron_ore_7_wood_3_png.rf.e6948b713add8953c5dd5893e232b4de.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.2864,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        0.82,
+        251.99,
+        436.33,
+        628.61
+      ],
+      "area": 164021.72
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2456-boardcamera_iron_ore_7_wood_3_png.rf.c5ee8a775c42c47e64fb780439406a4c.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.7706,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        0.02,
+        258.46,
+        409.17,
+        512.85
+      ],
+      "area": 104081.28
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2456-boardcamera_iron_ore_7_wood_3_png.rf.c5ee8a775c42c47e64fb780439406a4c.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.3123,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        0.58,
+        255.02,
+        409.78,
+        627.59
+      ],
+      "area": 152455.62
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2466-boardcamera_iron_ore_7_wood_png.rf.da73c3acecb26fc2b6837bef6ecc84db.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.8776,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        528.93,
+        112.0,
+        1280.0,
+        478.49
+      ],
+      "area": 275258.78
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2577-boardcamera_iron_ore_7_wood_png.rf.b0e3d625f8c45f5647c27f89936091e3.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.7322,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        0.65,
+        121.71,
+        403.9,
+        276.2
+      ],
+      "area": 62299.72
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2599-boardcamera_iron_ore_things_2_png.rf.2efbf8e69ec38d46342ffb4a7db23397.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.8864,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        0.31,
+        70.8,
+        452.99,
+        409.83
+      ],
+      "area": 153476.46
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2599-boardcamera_iron_ore_things_2_png.rf.2efbf8e69ec38d46342ffb4a7db23397.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.5412,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1222.45,
+        114.97,
+        1279.74,
+        312.65
+      ],
+      "area": 11325.24
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\26166-boardcamera_iron_ore_png.rf.839531436ef1fe1afc2e2470cbe05516.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.6315,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        813.56,
+        231.76,
+        919.52,
+        358.46
+      ],
+      "area": 13425.4
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\26166-boardcamera_iron_ore_png.rf.839531436ef1fe1afc2e2470cbe05516.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.4962,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1017.96,
+        231.81,
+        1118.71,
+        369.33
+      ],
+      "area": 13855.29
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2650-boardcamera_iron_ore_things_2_png.rf.4a3921c4b6c517485fe51ad4bbc1f112.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.4385,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        192.87,
+        135.98,
+        349.77,
+        297.8
+      ],
+      "area": 25390.39
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2663-boardcamera_iron_ore_jaspilito_3_png.rf.57e5c10d340c3ff7fa0e3f0b0fd60355.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.3387,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        717.48,
+        299.74,
+        862.84,
+        428.71
+      ],
+      "area": 18744.97
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\27386-boardcamera_iron_ore_png.rf.f72b47bc121de1bacd2e6c88a8161e5a.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7955,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        913.68,
+        218.78,
+        1187.45,
+        374.62
+      ],
+      "area": 42664.61
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\27386-boardcamera_iron_ore_png.rf.f72b47bc121de1bacd2e6c88a8161e5a.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7452,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        0.0,
+        236.81,
+        146.41,
+        512.03
+      ],
+      "area": 40295.63
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\27386-boardcamera_iron_ore_png.rf.f72b47bc121de1bacd2e6c88a8161e5a.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.706,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1184.17,
+        231.61,
+        1280.0,
+        496.66
+      ],
+      "area": 25401.02
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2740-boardcamera_iron_ore_7_wood_3_png.rf.cfc2204fa6226e37aec1d6fadbb9d5ba.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.8596,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        884.87,
+        231.24,
+        1117.76,
+        629.89
+      ],
+      "area": 92846.38
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\27585-boardcamera_iron_ore_png.rf.420d42f6c0dacd95a85ed391c6055e3d.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.862,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        225.79,
+        273.5,
+        489.63,
+        437.22
+      ],
+      "area": 43196.94
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\27585-boardcamera_iron_ore_png.rf.420d42f6c0dacd95a85ed391c6055e3d.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.775,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        70.79,
+        195.3,
+        269.89,
+        341.73
+      ],
+      "area": 29155.07
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\27585-boardcamera_iron_ore_png.rf.420d42f6c0dacd95a85ed391c6055e3d.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7298,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        938.1,
+        256.1,
+        1042.11,
+        378.64
+      ],
+      "area": 12745.68
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\27585-boardcamera_iron_ore_png.rf.420d42f6c0dacd95a85ed391c6055e3d.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.286,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        710.33,
+        344.64,
+        798.69,
+        419.33
+      ],
+      "area": 6599.84
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2775-boardcamera_iron_ore_7_wood_2_png.rf.526d5d8913ea8f2f6c64ab2e710de595.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7401,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        371.26,
+        326.85,
+        551.96,
+        414.37
+      ],
+      "area": 15815.42
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2775-boardcamera_iron_ore_7_wood_2_png.rf.526d5d8913ea8f2f6c64ab2e710de595.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.5743,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        0.0,
+        147.11,
+        894.45,
+        505.04
+      ],
+      "area": 320157.17
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2790-boardcamera_iron_ore_7_wood_2_png.rf.936f3640e1bd7b60f6ddd005c083e2b1.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8052,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1072.37,
+        163.4,
+        1279.77,
+        371.2
+      ],
+      "area": 43097.33
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2790-boardcamera_iron_ore_7_wood_2_png.rf.936f3640e1bd7b60f6ddd005c083e2b1.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.6495,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        180.58,
+        325.14,
+        378.81,
+        417.26
+      ],
+      "area": 18261.75
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2790-boardcamera_iron_ore_7_wood_2_png.rf.936f3640e1bd7b60f6ddd005c083e2b1.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.5677,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        0.0,
+        141.48,
+        740.83,
+        436.65
+      ],
+      "area": 218670.89
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2790-boardcamera_iron_ore_7_wood_2_png.rf.936f3640e1bd7b60f6ddd005c083e2b1.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.3119,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        0.0,
+        128.36,
+        741.96,
+        627.16
+      ],
+      "area": 370085.04
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2790-boardcamera_iron_ore_7_wood_2_png.rf.936f3640e1bd7b60f6ddd005c083e2b1.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.2213,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        182.15,
+        326.08,
+        348.77,
+        398.15
+      ],
+      "area": 12008.94
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2813-boardcamera_iron_ore_7_wood_2_png.rf.5bd4364931112002a78defdf9f37ece3.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8496,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        762.1,
+        169.57,
+        1059.99,
+        374.8
+      ],
+      "area": 61136.42
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2813-boardcamera_iron_ore_7_wood_2_png.rf.5bd4364931112002a78defdf9f37ece3.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.7524,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        2.82,
+        140.18,
+        416.97,
+        378.38
+      ],
+      "area": 98653.62
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2813-boardcamera_iron_ore_7_wood_2_png.rf.5bd4364931112002a78defdf9f37ece3.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.4101,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        0.0,
+        140.02,
+        419.16,
+        497.1
+      ],
+      "area": 149675.6
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2823-boardcamera_iron_ore_7_wood_2_png.rf.f95b1d99799ccd20f3dbbc87583a1330.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8342,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        632.2,
+        169.47,
+        910.92,
+        387.73
+      ],
+      "area": 60831.9
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2823-boardcamera_iron_ore_7_wood_2_png.rf.f95b1d99799ccd20f3dbbc87583a1330.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.6121,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        5.63,
+        132.41,
+        256.15,
+        395.64
+      ],
+      "area": 65943.67
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2823-boardcamera_iron_ore_7_wood_2_png.rf.f95b1d99799ccd20f3dbbc87583a1330.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.3554,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        0.0,
+        154.09,
+        259.7,
+        321.04
+      ],
+      "area": 43358.67
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2823-boardcamera_iron_ore_7_wood_2_png.rf.f95b1d99799ccd20f3dbbc87583a1330.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.2062,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        1.01,
+        139.96,
+        256.33,
+        519.54
+      ],
+      "area": 96913.94
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2847-boardcamera_iron_ore_7_wood_2_png.rf.af27f25c622f8e8e8e4d91b16c04d658.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8241,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        224.91,
+        155.76,
+        492.94,
+        399.78
+      ],
+      "area": 65405.04
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2872-boardcamera_iron_ore_jaspilito_2_png.rf.66e55a842507c610b0d6e4917efaeec3.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7963,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        748.17,
+        273.9,
+        880.21,
+        383.89
+      ],
+      "area": 14521.61
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2872-boardcamera_iron_ore_jaspilito_2_png.rf.66e55a842507c610b0d6e4917efaeec3.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7879,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        392.94,
+        226.12,
+        563.26,
+        450.27
+      ],
+      "area": 38177.0
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2872-boardcamera_iron_ore_jaspilito_2_png.rf.66e55a842507c610b0d6e4917efaeec3.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.456,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        155.35,
+        70.81,
+        347.07,
+        280.07
+      ],
+      "area": 40119.27
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2916-boardcamera_iron_ore_7_wood_2_png.rf.0fbfaca553bd31dfcbcfc97d9fcb0468.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.243,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        0.0,
+        208.86,
+        103.99,
+        369.72
+      ],
+      "area": 16726.47
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2986-boardcamera_iron_ore_7_wood_3_png.rf.3498896dd54aa7e0189211709f9e86b4.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8417,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        937.4,
+        259.2,
+        1238.49,
+        436.08
+      ],
+      "area": 53257.96
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\2986-boardcamera_iron_ore_7_wood_3_png.rf.3498896dd54aa7e0189211709f9e86b4.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.8088,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        258.61,
+        194.68,
+        1000.49,
+        412.15
+      ],
+      "area": 161343.17
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3180-boardcamera_iron_ore_canga2_png.rf.e7e0ae84d45496c89b0da852a7151312.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8318,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        161.69,
+        264.9,
+        410.85,
+        478.11
+      ],
+      "area": 53122.4
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3286-boardcamera_iron_ore_4_png.rf.491cdd903773d993de9c0e8c1db53e0f.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.6829,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        654.68,
+        303.22,
+        852.72,
+        455.18
+      ],
+      "area": 30093.55
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3324-boardcamera_iron_ore_canga2_png.rf.4c45d5585bb83ae2a70c411f9be4ec10.jpg",
+      "class_id": 1,
+      "class": "plastic",
+      "class_name": "塑料异物",
+      "confidence": 0.6165,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 1,
+      "predicted_class": "plastic",
+      "predicted_class_name": "塑料异物",
+      "bbox_xyxy": [
+        1225.76,
+        238.83,
+        1278.96,
+        304.24
+      ],
+      "area": 3479.19
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3324-boardcamera_iron_ore_canga2_png.rf.4c45d5585bb83ae2a70c411f9be4ec10.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.5887,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        839.92,
+        168.72,
+        986.95,
+        285.27
+      ],
+      "area": 17135.67
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3382-boardcamera_iron_ore_canga2_png.rf.1d6f7417f8399729e915b24773c5cf94.jpg",
+      "class_id": 1,
+      "class": "plastic",
+      "class_name": "塑料异物",
+      "confidence": 0.9417,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 1,
+      "predicted_class": "plastic",
+      "predicted_class_name": "塑料异物",
+      "bbox_xyxy": [
+        39.21,
+        229.1,
+        125.51,
+        304.3
+      ],
+      "area": 6489.79
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3382-boardcamera_iron_ore_canga2_png.rf.1d6f7417f8399729e915b24773c5cf94.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8333,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        511.75,
+        158.77,
+        725.96,
+        360.47
+      ],
+      "area": 43206.08
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3494-boardcamera_iron_ore_canga2_png.rf.63a74a8aa7b01db1938a2a281f12f18b.jpg",
+      "class_id": 1,
+      "class": "plastic",
+      "class_name": "塑料异物",
+      "confidence": 0.8539,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 1,
+      "predicted_class": "plastic",
+      "predicted_class_name": "塑料异物",
+      "bbox_xyxy": [
+        2.77,
+        450.75,
+        473.73,
+        624.89
+      ],
+      "area": 82011.86
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3494-boardcamera_iron_ore_canga2_png.rf.63a74a8aa7b01db1938a2a281f12f18b.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8366,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1.36,
+        320.27,
+        271.49,
+        501.33
+      ],
+      "area": 48909.55
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3494-boardcamera_iron_ore_canga2_png.rf.63a74a8aa7b01db1938a2a281f12f18b.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.5721,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        51.21,
+        197.33,
+        169.55,
+        328.89
+      ],
+      "area": 15568.99
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3494-boardcamera_iron_ore_canga2_png.rf.63a74a8aa7b01db1938a2a281f12f18b.jpg",
+      "class_id": 1,
+      "class": "plastic",
+      "class_name": "塑料异物",
+      "confidence": 0.4757,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 1,
+      "predicted_class": "plastic",
+      "predicted_class_name": "塑料异物",
+      "bbox_xyxy": [
+        455.51,
+        343.74,
+        539.59,
+        380.38
+      ],
+      "area": 3080.9
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3494-boardcamera_iron_ore_canga2_png.rf.63a74a8aa7b01db1938a2a281f12f18b.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.3176,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 1,
+      "predicted_class": "plastic",
+      "predicted_class_name": "塑料异物",
+      "bbox_xyxy": [
+        467.87,
+        338.64,
+        533.6,
+        376.59
+      ],
+      "area": 2494.18
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3636-boardcamera_iron_ore_4_png.rf.017558aad239a87594fe6dd1caccbfc3.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.6321,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        553.52,
+        288.18,
+        716.4,
+        379.07
+      ],
+      "area": 14804.76
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3810-boardcamera_iron_ore_3_png.rf.e446aadab9c051c33edf38d21672a056.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8328,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        447.18,
+        178.1,
+        707.66,
+        403.48
+      ],
+      "area": 58705.03
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3810-boardcamera_iron_ore_3_png.rf.e446aadab9c051c33edf38d21672a056.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8306,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1017.67,
+        187.52,
+        1280.0,
+        356.13
+      ],
+      "area": 44230.87
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3825-boardcamera_iron_ore_3_png.rf.72932cfb5ad883498ad78f3738f8ba72.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8407,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        899.64,
+        191.31,
+        1167.94,
+        353.99
+      ],
+      "area": 43648.07
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3825-boardcamera_iron_ore_3_png.rf.72932cfb5ad883498ad78f3738f8ba72.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8308,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        315.06,
+        174.41,
+        580.72,
+        405.07
+      ],
+      "area": 61275.74
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3825-boardcamera_iron_ore_3_png.rf.72932cfb5ad883498ad78f3738f8ba72.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.4859,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        176.33,
+        324.68,
+        436.73,
+        504.51
+      ],
+      "area": 46830.35
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3956-boardcamera_iron_ore_3_png.rf.5ee7d97e1a927efa654f688ffcbf5250.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8357,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1.59,
+        174.58,
+        278.95,
+        347.87
+      ],
+      "area": 48065.08
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\3956-boardcamera_iron_ore_3_png.rf.5ee7d97e1a927efa654f688ffcbf5250.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.79,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        869.67,
+        217.31,
+        1081.39,
+        318.18
+      ],
+      "area": 21355.3
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4014-boardcamera_iron_ore_3_png.rf.af9b3204024bab2f6b13fa2ae744c073.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8524,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1098.35,
+        137.56,
+        1280.0,
+        356.41
+      ],
+      "area": 39754.5
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4014-boardcamera_iron_ore_3_png.rf.af9b3204024bab2f6b13fa2ae744c073.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8015,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        638.24,
+        215.01,
+        847.41,
+        316.69
+      ],
+      "area": 21268.81
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4214-boardcamera_iron_ore_3_png.rf.e77c17f077ad95c07f482487f584b012.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8309,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1039.77,
+        129.17,
+        1280.0,
+        356.32
+      ],
+      "area": 54567.75
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4214-boardcamera_iron_ore_3_png.rf.e77c17f077ad95c07f482487f584b012.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8055,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        590.68,
+        212.1,
+        790.02,
+        317.51
+      ],
+      "area": 21012.32
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4238-boardcamera_iron_ore_3_png.rf.96925336ca0ed622f22c83c8080f50fb.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8484,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        913.02,
+        130.11,
+        1192.3,
+        347.84
+      ],
+      "area": 60806.29
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4238-boardcamera_iron_ore_3_png.rf.96925336ca0ed622f22c83c8080f50fb.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8123,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        468.93,
+        210.93,
+        670.57,
+        315.2
+      ],
+      "area": 21025.15
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4824-boardcamera_iron_ore_3_png.rf.f2b205cf15330de0855070d775973946.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8094,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        946.77,
+        246.96,
+        1066.5,
+        369.51
+      ],
+      "area": 14672.36
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4824-boardcamera_iron_ore_3_png.rf.f2b205cf15330de0855070d775973946.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7528,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        1063.76,
+        229.22,
+        1176.13,
+        336.75
+      ],
+      "area": 12083.04
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4824-boardcamera_iron_ore_3_png.rf.f2b205cf15330de0855070d775973946.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.649,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        406.29,
+        252.45,
+        499.49,
+        340.9
+      ],
+      "area": 8243.26
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4844-boardcamera_iron_ore_3_png.rf.eee50c49bab1d7fa5baa2ea939efe846.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8024,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        752.67,
+        245.86,
+        869.21,
+        374.29
+      ],
+      "area": 14967.95
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4844-boardcamera_iron_ore_3_png.rf.eee50c49bab1d7fa5baa2ea939efe846.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7646,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        862.86,
+        230.44,
+        979.01,
+        344.74
+      ],
+      "area": 13274.96
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4844-boardcamera_iron_ore_3_png.rf.eee50c49bab1d7fa5baa2ea939efe846.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.7561,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        204.25,
+        241.88,
+        304.76,
+        341.39
+      ],
+      "area": 10002.36
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4878-boardcamera_iron_ore_3_png.rf.d85893033d0f53eeddb23a4f21fc3605.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8721,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        580.28,
+        233.32,
+        686.39,
+        337.88
+      ],
+      "area": 11094.57
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\4878-boardcamera_iron_ore_3_png.rf.d85893033d0f53eeddb23a4f21fc3605.jpg",
+      "class_id": 0,
+      "class": "stone",
+      "class_name": "石块异物",
+      "confidence": 0.8239,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 0,
+      "predicted_class": "stone",
+      "predicted_class_name": "石块异物",
+      "bbox_xyxy": [
+        482.99,
+        246.44,
+        589.62,
+        365.99
+      ],
+      "area": 12747.58
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\8022-boardcamera_iron_ore_things_3_png.rf.75c880e1493c78380fb3174c3c8fd499.jpg",
+      "class_id": 2,
+      "class": "metal",
+      "class_name": "金属异物",
+      "confidence": 0.925,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 2,
+      "predicted_class": "metal",
+      "predicted_class_name": "金属异物",
+      "bbox_xyxy": [
+        0.0,
+        209.06,
+        199.66,
+        427.2
+      ],
+      "area": 43554.38
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\8022-boardcamera_iron_ore_things_3_png.rf.75c880e1493c78380fb3174c3c8fd499.jpg",
+      "class_id": 2,
+      "class": "metal",
+      "class_name": "金属异物",
+      "confidence": 0.4156,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 2,
+      "predicted_class": "metal",
+      "predicted_class_name": "金属异物",
+      "bbox_xyxy": [
+        51.65,
+        217.97,
+        193.15,
+        395.17
+      ],
+      "area": 25074.14
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\8022-boardcamera_iron_ore_things_3_png.rf.75c880e1493c78380fb3174c3c8fd499.jpg",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.1937,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 2,
+      "predicted_class": "metal",
+      "predicted_class_name": "金属异物",
+      "bbox_xyxy": [
+        1.16,
+        163.09,
+        202.94,
+        395.24
+      ],
+      "area": 46843.11
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\8349-boardcamera_iron_ore_things_3_png.rf.e3b911fd4168ddec374670ca2e4c3aad.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.7805,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        1.21,
+        63.54,
+        458.82,
+        344.39
+      ],
+      "area": 128518.1
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\data\\yolo_yiwu\\images\\test\\8349-boardcamera_iron_ore_things_3_png.rf.e3b911fd4168ddec374670ca2e4c3aad.jpg",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.5282,
+      "rejected_as_unknown": false,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        1.61,
+        62.19,
+        746.84,
+        336.43
+      ],
+      "area": 204371.33
+    }
+  ],
+  "visualization_dir": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\detections_vis"
+}

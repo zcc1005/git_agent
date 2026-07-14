@@ -4,7 +4,7 @@ RAW_ZIP = PROJECT_ROOT / "data" / "raw" / "yolo_images.zip"
 OUTPUT_DIR = OUTPUTS_DIR
 RUN_DIR = YOLO_RUN_DIR
 
-CLASS_NAMES = ["unknown", "stone", "plastic", "metal", "wood"]
+CLASS_NAMES = ["stone", "plastic", "metal", "wood"]
 CLASS_DISPLAY_NAMES = {
     "stone": "石块异物",
     "plastic": "塑料异物",
