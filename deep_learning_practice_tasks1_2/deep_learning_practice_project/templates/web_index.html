@@ -16,7 +16,12 @@
       <div id="statusBadge" class="status-badge">就绪</div>
     </header>
 
-    <section class="workspace">
+    <nav class="mode-tabs" aria-label="检测模式">
+      <button type="button" class="mode-tab active" data-mode="image">图片检测</button>
+      <button type="button" class="mode-tab" data-mode="video">视频检测</button>
+    </nav>
+
+    <section id="imageMode" class="workspace mode-panel active">
       <form id="pipelineForm" class="control-panel">
         <div class="section-title">任务1 · 输入命令</div>
         <div class="segmented" role="radiogroup" aria-label="手动命令">
@@ -120,6 +125,83 @@
           <div>
             <h2>detection.json 摘要</h2>
             <pre id="detectionJson">{}</pre>
+          </div>
+        </section>
+      </section>
+    </section>
+
+    <section id="videoMode" class="workspace mode-panel">
+      <form id="videoForm" class="control-panel">
+        <div class="section-title">上传监控视频</div>
+        <label class="file-picker">
+          <input id="videoInput" name="video" type="file" accept="video/*,.avi,.mkv,.flv,.wmv,.mpeg,.mpg" required>
+          <span>选择需要检测的视频</span>
+        </label>
+        <video id="videoPreview" class="video-preview" controls preload="metadata"></video>
+        <div id="videoFileHint" class="hint">上传后只保存检测到异物的带框图片。</div>
+
+        <div class="video-param-grid">
+          <label>
+            <span>视频开始时间</span>
+            <input id="videoStartTime" name="video_start_time" type="datetime-local" step="1" required>
+          </label>
+          <label>
+            <span>每秒检测帧数（FPS）</span>
+            <input id="videoFps" name="fps" type="number" min="0.1" max="60" step="0.1" value="2" required>
+          </label>
+          <label>
+            <span>YOLO 最低置信度</span>
+            <input id="videoConf" name="conf" type="number" min="0.01" max="0.39" step="0.01" value="0.15" required>
+          </label>
+        </div>
+
+        <button id="videoRunButton" type="submit" class="primary-button">上传并检测视频</button>
+      </form>
+
+      <section class="result-panel video-result-panel">
+        <div class="section-title">视频检测结果</div>
+        <div class="progress-wrap" aria-label="视频检测进度">
+          <div class="progress-track">
+            <div id="videoProgressFill" class="progress-fill"></div>
+          </div>
+          <div class="progress-labels">
+            <span id="videoProgressText">等待上传视频</span>
+            <span id="videoProgressPercent">0%</span>
+          </div>
+        </div>
+
+        <div class="video-metrics">
+          <div><strong id="videoEventCount">0</strong><span>异物时间段</span></div>
+          <div><strong id="videoPositiveFrames">0</strong><span>命中并保存的帧</span></div>
+          <div><strong id="videoSampledFrames">0</strong><span>YOLO 检测帧</span></div>
+          <div><strong id="videoClassSummary">无</strong><span>异物类别</span></div>
+        </div>
+
+        <div id="videoResultMessage" class="video-result-message">检测完成后在这里显示异物出现时间段。</div>
+
+        <div class="event-table-wrap">
+          <table class="event-table">
+            <thead>
+              <tr>
+                <th>序号</th>
+                <th>视频内时间</th>
+                <th>实际时间</th>
+                <th>异物数量</th>
+                <th>类别</th>
+                <th>最高置信度</th>
+              </tr>
+            </thead>
+            <tbody id="videoEventRows"></tbody>
+          </table>
+        </div>
+
+        <section class="video-gallery-section">
+          <div class="block-head">
+            <h2>各时间段关键帧</h2>
+            <span id="videoResultPath"></span>
+          </div>
+          <div id="videoGallery" class="video-gallery">
+            <div class="gallery-placeholder">检测到异物后显示带框关键帧</div>
           </div>
         </section>
       </section>

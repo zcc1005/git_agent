@@ -70,6 +70,8 @@ class YoloAnnotator:
         max_window_w: int = 1280,
         max_window_h: int = 800,
         unknown_dir: Path = DATA_DIR / "yolo_unknown_eval",
+        only_missing_labels: bool = False,
+        only_unlabeled: bool = False,
     ):
         self.data_dir = data_dir
         self.split = split
@@ -88,6 +90,24 @@ class YoloAnnotator:
 
         if not self.images:
             raise RuntimeError(f"No images found: {self.image_dir}")
+
+        if only_missing_labels or only_unlabeled:
+            filtered_images = []
+            for image_path in self.images:
+                label_path = self.yolo_label_path(image_path)
+                if only_missing_labels and not label_path.exists():
+                    filtered_images.append(image_path)
+                    continue
+                if only_unlabeled:
+                    if not label_path.exists():
+                        filtered_images.append(image_path)
+                        continue
+                    if not label_path.read_text(encoding="utf-8").strip():
+                        filtered_images.append(image_path)
+            self.images = filtered_images
+
+        if not self.images:
+            raise RuntimeError("No images matched the selected annotation filter")
 
         self.idx = max(0, min(start, len(self.images) - 1))
         self.max_window_w = max_window_w
@@ -112,6 +132,10 @@ class YoloAnnotator:
         print(f"Images: {self.image_dir}")
         print(f"Labels: {self.label_dir}")
         print(f"Found {len(self.images)} images")
+        if only_missing_labels:
+            print("Filter: only images without label files")
+        if only_unlabeled:
+            print("Filter: only images with missing or empty labels")
         print("Classes:")
         for class_id, name in enumerate(CLASS_NAMES):
             print(f"  {class_id}: {CLASS_DISPLAY_NAMES.get(name, name)}")
@@ -383,13 +407,28 @@ def main():
         default=DATA_DIR / "yolo_unknown_eval",
         help="含 unknown 框的整图归档目录",
     )
+    parser.add_argument(
+        "--only-missing-labels",
+        action="store_true",
+        help="Only annotate images whose label file does not exist",
+    )
+    parser.add_argument(
+        "--only-unlabeled",
+        action="store_true",
+        help="Only annotate images whose label file is missing or empty",
+    )
     args = parser.parse_args()
+
+    if args.only_missing_labels and args.only_unlabeled:
+        parser.error("--only-missing-labels and --only-unlabeled cannot be used together")
 
     YoloAnnotator(
         args.data_dir,
         args.split,
         args.start,
         unknown_dir=args.unknown_dir,
+        only_missing_labels=args.only_missing_labels,
+        only_unlabeled=args.only_unlabeled,
     ).run()
 
 
