@@ -30,7 +30,19 @@ from main_pipeline import (
 )
 from task2_yolo.detect_yolo import detect_yiwu, make_skipped_json, read_command, should_start_detection
 from task3_alarm.generate_alarm_qwen_lora import generate_alarm_report
-from video_detection import detect_video_foreign_objects, parse_video_start_time
+from video_detection import (
+    DEFAULT_DUPLICATE_IOU,
+    DEFAULT_EVENT_SILENCE_SECONDS,
+    DEFAULT_IMGSZ,
+    DEFAULT_MIN_UNKNOWN_HITS,
+    DEFAULT_NMS_IOU,
+    DEFAULT_TRACK_CENTER_DISTANCE_RATIO,
+    DEFAULT_TRACK_MAX_AGE_SECONDS,
+    DEFAULT_UNKNOWN_SINGLE_FRAME_CONF,
+    detect_video_foreign_objects,
+    parse_roi,
+    parse_video_start_time,
+)
 
 
 app = Flask(__name__)
@@ -123,6 +135,23 @@ def build_video_response(result: Dict[str, Any]) -> Dict[str, Any]:
         event_data = dict(event)
         key_frame = PROJECT_ROOT / str(event_data["key_frame"])
         event_data["key_frame_url"] = path_to_output_url(key_frame)
+        key_frames = []
+        for raw_key_frame in event_data.get("key_frames", []):
+            key_frame_data = dict(raw_key_frame)
+            image_path = PROJECT_ROOT / str(key_frame_data.get("image", ""))
+            key_frame_data["image_url"] = path_to_output_url(image_path)
+            key_frames.append(key_frame_data)
+        if not key_frames and event_data["key_frame_url"]:
+            key_frames.append(
+                {
+                    "image": event_data["key_frame"],
+                    "image_url": event_data["key_frame_url"],
+                    "track_ids": event_data.get("track_ids", []),
+                    "object_count": event_data.get("object_count", 0),
+                    "class_counts": event_data.get("class_counts", {}),
+                }
+            )
+        event_data["key_frames"] = key_frames
         events.append(event_data)
 
     return {
@@ -135,12 +164,25 @@ def build_video_response(result: Dict[str, Any]) -> Dict[str, Any]:
         "sample_fps": result["sample_fps"],
         "sampled_frames": result["sampled_frames"],
         "positive_frames": result["positive_frames"],
+        "candidate_frames": result.get("candidate_frames", 0),
+        "raw_detection_frames": result.get("raw_detection_frames", result["positive_frames"]),
         "saved_images": result["saved_images"],
+        "num_raw_detection_boxes": result.get(
+            "num_raw_detection_boxes", result.get("num_detection_boxes", 0)
+        ),
+        "num_deduplicated_boxes": result.get(
+            "num_deduplicated_boxes", result.get("num_detection_boxes", 0)
+        ),
+        "num_detection_boxes": result.get("num_detection_boxes", 0),
+        "unique_object_count": result.get("unique_object_count", 0),
         "has_foreign_object": result["has_foreign_object"],
         "num_events": result["num_events"],
         "class_counts": result["class_counts"],
         "events": events,
         "result_json": result["result_json"],
+        "thresholds": result.get("thresholds", {}),
+        "temporal_parameters": result.get("temporal_parameters", {}),
+        "inference_parameters": result.get("inference_parameters", {}),
     }
 
 
@@ -323,6 +365,43 @@ def api_video_detect():
         video_start = parse_video_start_time(request.form.get("video_start_time", ""))
         sample_fps = float(request.form.get("fps", "2"))
         conf = float(request.form.get("conf", "0.15"))
+        imgsz = int(request.form.get("imgsz", str(DEFAULT_IMGSZ)))
+        nms_iou = float(request.form.get("nms_iou", str(DEFAULT_NMS_IOU)))
+        duplicate_iou = float(
+            request.form.get("duplicate_iou", str(DEFAULT_DUPLICATE_IOU))
+        )
+        event_silence_seconds = float(
+            request.form.get(
+                "event_silence_seconds", str(DEFAULT_EVENT_SILENCE_SECONDS)
+            )
+        )
+        track_max_age_seconds = float(
+            request.form.get(
+                "track_max_age_seconds", str(DEFAULT_TRACK_MAX_AGE_SECONDS)
+            )
+        )
+        min_unknown_hits = int(
+            request.form.get("min_unknown_hits", str(DEFAULT_MIN_UNKNOWN_HITS))
+        )
+        unknown_single_frame_conf = float(
+            request.form.get(
+                "unknown_single_frame_conf",
+                str(DEFAULT_UNKNOWN_SINGLE_FRAME_CONF),
+            )
+        )
+        track_center_distance_ratio = float(
+            request.form.get(
+                "track_center_distance_ratio",
+                str(DEFAULT_TRACK_CENTER_DISTANCE_RATIO),
+            )
+        )
+        agnostic_nms = request.form.get("agnostic_nms", "false").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        roi = parse_roi(request.form.get("roi", ""))
 
         with pipeline_lock:
             video_path = save_uploaded_video(uploaded_file)
@@ -334,6 +413,16 @@ def api_video_detect():
                 video_start=video_start,
                 sample_fps=sample_fps,
                 conf=conf,
+                imgsz=imgsz,
+                nms_iou=nms_iou,
+                agnostic_nms=agnostic_nms,
+                duplicate_iou=duplicate_iou,
+                event_silence_seconds=event_silence_seconds,
+                track_max_age_seconds=track_max_age_seconds,
+                min_unknown_hits=min_unknown_hits,
+                unknown_single_frame_conf=unknown_single_frame_conf,
+                track_center_distance_ratio=track_center_distance_ratio,
+                roi=roi,
             )
         return jsonify({"ok": True, "video_detection": build_video_response(result)})
     except (ValueError, FileNotFoundError) as exc:
