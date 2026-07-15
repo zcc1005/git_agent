@@ -1,14 +1,14 @@
 {
   "status": "detected",
-  "timestamp": "2026-07-15 13:16:28",
-  "source": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_131627_806198_1951-boardcamera_iron_ore_canga_png.rf.9b1fe495901ebaa19111b48fc9db64a1.jpg",
+  "timestamp": "2026-07-15 16:26:33",
+  "source": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_162632_767250_05e07dfe-8354-4044-bd28-b5cf60e30b4b.png",
   "model_path": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\runs\\yolo\\yiwu_yolov8s_4class\\weights\\best.pt",
   "thresholds": {
     "detection_min_confidence": 0.15,
     "known_class_min_confidence": 0.4
   },
   "num_images": 1,
-  "num_detections": 3,
+  "num_detections": 4,
   "has_yiwu": true,
   "has_foreign_object": true,
   "class_names": [
@@ -26,62 +26,82 @@
     "yiwu": "未知异物"
   },
   "class_counts": {
-    "石块异物": 3
+    "石块异物": 1,
+    "木块异物": 2,
+    "未知异物": 1
   },
   "objects": [
     {
-      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_131627_806198_1951-boardcamera_iron_ore_canga_png.rf.9b1fe495901ebaa19111b48fc9db64a1.jpg",
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_162632_767250_05e07dfe-8354-4044-bd28-b5cf60e30b4b.png",
       "class_id": 0,
       "class": "stone",
       "class_name": "石块异物",
-      "confidence": 0.8433,
+      "confidence": 0.588,
       "rejected_as_unknown": false,
       "predicted_class_id": 0,
       "predicted_class": "stone",
       "predicted_class_name": "石块异物",
       "bbox_xyxy": [
-        187.33,
-        178.84,
-        529.81,
-        429.06
+        516.71,
+        285.6,
+        1082.49,
+        741.47
       ],
-      "area": 85694.5
+      "area": 257924.78
     },
     {
-      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_131627_806198_1951-boardcamera_iron_ore_canga_png.rf.9b1fe495901ebaa19111b48fc9db64a1.jpg",
-      "class_id": 0,
-      "class": "stone",
-      "class_name": "石块异物",
-      "confidence": 0.838,
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_162632_767250_05e07dfe-8354-4044-bd28-b5cf60e30b4b.png",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.4736,
       "rejected_as_unknown": false,
-      "predicted_class_id": 0,
-      "predicted_class": "stone",
-      "predicted_class_name": "石块异物",
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
       "bbox_xyxy": [
-        0.0,
-        216.33,
-        165.92,
-        427.7
+        512.83,
+        274.4,
+        1405.89,
+        739.84
       ],
-      "area": 35071.8
+      "area": 415668.19
     },
     {
-      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_131627_806198_1951-boardcamera_iron_ore_canga_png.rf.9b1fe495901ebaa19111b48fc9db64a1.jpg",
-      "class_id": 0,
-      "class": "stone",
-      "class_name": "石块异物",
-      "confidence": 0.8131,
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_162632_767250_05e07dfe-8354-4044-bd28-b5cf60e30b4b.png",
+      "class_id": 3,
+      "class": "wood",
+      "class_name": "木块异物",
+      "confidence": 0.4329,
       "rejected_as_unknown": false,
-      "predicted_class_id": 0,
-      "predicted_class": "stone",
-      "predicted_class_name": "石块异物",
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
       "bbox_xyxy": [
-        1135.59,
-        258.1,
-        1280.0,
-        512.79
+        518.65,
+        281.39,
+        1138.54,
+        736.03
       ],
-      "area": 36780.09
+      "area": 281826.92
+    },
+    {
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_162632_767250_05e07dfe-8354-4044-bd28-b5cf60e30b4b.png",
+      "class_id": null,
+      "class": "unknown",
+      "class_name": "未知异物",
+      "confidence": 0.1652,
+      "rejected_as_unknown": true,
+      "predicted_class_id": 3,
+      "predicted_class": "wood",
+      "predicted_class_name": "木块异物",
+      "bbox_xyxy": [
+        508.8,
+        282.69,
+        1344.87,
+        895.76
+      ],
+      "area": 512571.73
     }
   ],
   "visualization_dir": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\detections_vis"

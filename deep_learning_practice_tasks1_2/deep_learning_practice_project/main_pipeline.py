@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -11,7 +10,6 @@ from typing import Any, Dict
 
 from project_config import (
     PROJECT_ROOT,
-    SPEECH_CKPT_PATH,
     YOLO_MODEL_PATH,
     resolve_project_path,
 )
@@ -31,13 +29,11 @@ COMMAND_MEANINGS = {
 }
 
 COMMAND_JSON = PROJECT_ROOT / "outputs" / "command.json"
-MIC_COMMAND_WAV = PROJECT_ROOT / "outputs" / "mic_command.wav"
 DETECTION_JSON = PROJECT_ROOT / "outputs" / "detection.json"
 ALARM_REPORT = PROJECT_ROOT / "outputs" / "alarm_report.txt"
 IMAGE_UNIFIED_ALARM = PROJECT_ROOT / "outputs" / "unified_alarm_image.json"
 DEFAULT_SOURCE = PROJECT_ROOT / "data" / "yolo_yiwu" / "images" / "test"
 DEFAULT_YOLO_MODEL = YOLO_MODEL_PATH
-DEFAULT_SPEECH_CKPT = SPEECH_CKPT_PATH
 
 
 def display_path(path: Path) -> str:
@@ -66,71 +62,11 @@ def write_manual_command(command: str) -> Path:
     return COMMAND_JSON
 
 
-def record_microphone(wav_path: Path, seconds: float = 1.5, sample_rate: int = 16000) -> Path:
-    try:
-        import sounddevice as sd
-        from scipy.io.wavfile import write as write_wav
-    except ImportError as exc:
-        raise RuntimeError(
-            "缺少麦克风录音依赖，请先安装：pip install sounddevice scipy"
-        ) from exc
-
-    wav_path.parent.mkdir(parents=True, exist_ok=True)
-    num_samples = int(seconds * sample_rate)
-    if num_samples <= 0:
-        raise ValueError("录音时长必须大于 0 秒")
-
-    try:
-        audio = sd.rec(num_samples, samplerate=sample_rate, channels=1, dtype="float32")
-        sd.wait()
-    except Exception as exc:
-        raise RuntimeError(f"麦克风录音失败：{exc}") from exc
-
-    audio_int16 = (audio.clip(-1.0, 1.0) * 32767).astype("int16")
-    write_wav(wav_path, sample_rate, audio_int16)
-    return wav_path
-
-
-def run_speech_prediction(
-    project_root: Path,
-    wav_path: Path,
-    speech_ckpt: Path,
-    command_json: Path,
-) -> Path:
-    script_path = project_root / "task1_speech" / "predict_command.py"
-    if not script_path.exists():
-        raise FileNotFoundError(f"未找到语音识别脚本：{script_path}")
-    if not speech_ckpt.exists():
-        raise FileNotFoundError(
-            f"未找到语音识别模型：{speech_ckpt}\n"
-            "请先运行 task1_speech/train_speech_transformer.py"
-        )
-
-    command_json.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        sys.executable,
-        str(script_path),
-        "--wav",
-        display_path(wav_path),
-        "--ckpt",
-        display_path(speech_ckpt),
-        "--output",
-        display_path(command_json),
-    ]
-    try:
-        subprocess.run(cmd, cwd=project_root, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise RuntimeError(f"语音命令识别失败，退出码：{exc.returncode}") from exc
-    if not command_json.exists():
-        raise FileNotFoundError(f"语音识别未生成 command.json：{command_json}")
-    return command_json
-
-
 def load_existing_command() -> Dict[str, Any]:
     if not COMMAND_JSON.exists():
         raise FileNotFoundError(
             f"未找到已有 command.json：{COMMAND_JSON}\n"
-            "请先运行任务一，或直接使用：python main_pipeline.py --command go"
+            "请先生成手动控制命令，或直接使用：python main_pipeline.py --command go"
         )
     command = read_command(COMMAND_JSON)
     if not command:
@@ -191,15 +127,6 @@ def validate_detection_inputs(source: Path, yolo_model: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="工业皮带异物检测与智能报警系统一键流程")
-    parser.add_argument("--mic", action="store_true", help="使用麦克风语音输入命令")
-    parser.add_argument("--record_seconds", type=float, default=1.5, help="麦克风录音时长，默认 1.5 秒")
-    parser.add_argument("--sample_rate", type=int, default=16000, help="麦克风采样率，默认 16000")
-    parser.add_argument(
-        "--speech_ckpt",
-        type=Path,
-        default=DEFAULT_SPEECH_CKPT,
-        help="语音识别模型路径，默认 runs/speech_transformer/best_model.pt",
-    )
     parser.add_argument(
         "--command",
         choices=["go", "stop", "yes", "no"],
@@ -247,23 +174,11 @@ def main() -> None:
     args = parse_args()
     source = resolve_project_path(args.source)
     yolo_model = resolve_project_path(args.yolo_model)
-    speech_ckpt = resolve_project_path(args.speech_ckpt)
 
     print("========== 工业皮带异物检测与智能报警系统 ==========")
     print(f"项目根目录：{PROJECT_ROOT}")
 
-    if args.mic:
-        print("\n[任务1] 麦克风语音命令识别")
-        print(f"请在 {args.record_seconds:g} 秒内说出命令：go / stop / yes / no")
-        record_microphone(MIC_COMMAND_WAV, args.record_seconds, args.sample_rate)
-        print(f"录音已保存：{display_path(MIC_COMMAND_WAV)}")
-        print("开始识别语音命令...")
-        command_path = run_speech_prediction(PROJECT_ROOT, MIC_COMMAND_WAV, speech_ckpt, COMMAND_JSON)
-        print(f"command.json 已生成：{display_path(command_path)}")
-        command = read_command(COMMAND_JSON)
-        if not command:
-            raise ValueError(f"command.json 为空或读取失败：{COMMAND_JSON}")
-    elif args.use_existing_command:
+    if args.use_existing_command:
         print("当前模式：使用已有 command.json")
         command = load_existing_command()
     else:

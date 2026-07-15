@@ -171,14 +171,6 @@ select {
   background: var(--accent);
 }
 
-.mic-row {
-  display: grid;
-  grid-template-columns: 1fr 110px;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.small-field span,
 .param-grid span {
   display: block;
   margin-bottom: 6px;
@@ -186,7 +178,6 @@ select {
   font-size: 12px;
 }
 
-.small-field input,
 .param-grid input,
 .param-grid select {
   width: 100%;
@@ -289,8 +280,7 @@ select {
   font-weight: 600;
 }
 
-.primary-button,
-.secondary-button {
+.primary-button {
   height: 42px;
   border: 0;
   border-radius: 6px;
@@ -308,17 +298,7 @@ select {
   background: var(--accent-strong);
 }
 
-.secondary-button {
-  color: #fff;
-  background: #31566b;
-}
-
-.secondary-button:hover {
-  background: #244354;
-}
-
-.primary-button:disabled,
-.secondary-button:disabled {
+.primary-button:disabled {
   cursor: wait;
   opacity: 0.65;
 }

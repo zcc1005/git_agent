@@ -22,12 +22,19 @@ ENV/
 
 # Deep learning datasets and generated artifacts
 deep_learning_practice_tasks1_2/deep_learning_practice_project/data/*
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/data/demo/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/data/demo/*
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/data/demo/README.md
 !deep_learning_practice_tasks1_2/deep_learning_practice_project/data/yolo_yiwu/
 !deep_learning_practice_tasks1_2/deep_learning_practice_project/data/yolo_yiwu/**
 !deep_learning_practice_tasks1_2/deep_learning_practice_project/data/yolo_unknown_eval/
 !deep_learning_practice_tasks1_2/deep_learning_practice_project/data/yolo_unknown_eval/**
 deep_learning_practice_tasks1_2/deep_learning_practice_project/outputs/
 deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/
+
+# Machine-specific project configuration
+deep_learning_practice_tasks1_2/deep_learning_practice_project/config/local.yaml
+deep_learning_practice_tasks1_2/deep_learning_practice_project/config/*.local.yaml
 
 # Model weights, checkpoints, and serialized training outputs
 *.pt

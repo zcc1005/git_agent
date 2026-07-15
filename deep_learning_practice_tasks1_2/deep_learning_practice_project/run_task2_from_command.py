@@ -1,4 +1,4 @@
-"""便捷入口：读取 outputs/command.json，如果 command 为 go，则执行任务2检测。"""
+"""兼容入口：读取手动控制 command.json，如果 command 为 go，则执行图片检测。"""
 
 # 允许直接用 PyCharm/命令行运行本文件，而不必使用 python -m。
 import sys

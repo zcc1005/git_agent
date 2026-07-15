@@ -1,11 +1,9 @@
 const form = document.getElementById("pipelineForm");
-const micButton = document.getElementById("micButton");
 const runButton = document.getElementById("runButton");
 const statusBadge = document.getElementById("statusBadge");
-const recordSeconds = document.getElementById("recordSeconds");
 const imageInput = document.getElementById("imageInput");
 const previewImage = document.getElementById("previewImage");
-const micResult = document.getElementById("micResult");
+const commandHint = document.getElementById("commandHint");
 const commandSummary = document.getElementById("commandSummary");
 const detectionSummary = document.getElementById("detectionSummary");
 const alarmSummary = document.getElementById("alarmSummary");
@@ -44,7 +42,6 @@ const videoResultPath = document.getElementById("videoResultPath");
 const videoAlarmPath = document.getElementById("videoAlarmPath");
 const videoAlarmReport = document.getElementById("videoAlarmReport");
 
-let commandMode = "manual";
 let progressTimer = null;
 let videoProgressTimer = null;
 let videoPreviewUrl = null;
@@ -82,7 +79,6 @@ function setStatus(text, state = "") {
 }
 
 function setBusy(isBusy, text = "运行中") {
-  micButton.disabled = isBusy;
   runButton.disabled = isBusy;
   document.querySelectorAll("input[name='command']").forEach((input) => {
     input.disabled = isBusy;
@@ -167,13 +163,12 @@ async function sendAlarmAction(action) {
       throw new Error(data.error || "报警控制失败");
     }
     updateResult(data);
-    micResult.textContent = data.message;
+    commandHint.textContent = data.message;
     alarmSummary.textContent = data.message;
     setStatus(action === "yes" ? "继续报警" : "已停止");
   } catch (error) {
     showError(error.message);
   } finally {
-    micButton.disabled = false;
     runButton.disabled = false;
     document.querySelectorAll("input[name='command']").forEach((input) => {
       input.disabled = false;
@@ -184,12 +179,11 @@ async function sendAlarmAction(action) {
 document.querySelectorAll("input[name='command']").forEach((input) => {
   input.addEventListener("change", () => {
     const value = input.value;
-    commandMode = "manual";
     if (value === "yes" || value === "no") {
-      micResult.textContent = value === "yes" ? "正在确认并继续当前报警。" : "正在停止当前报警。";
+      commandHint.textContent = value === "yes" ? "正在确认并继续当前报警。" : "正在停止当前报警。";
       sendAlarmAction(value);
     } else {
-      micResult.textContent = "当前使用手动命令。";
+      commandHint.textContent = "当前使用手动控制。";
     }
   });
 });
@@ -211,7 +205,6 @@ async function runPipeline() {
   }
 
   const body = new FormData();
-  body.append("mode", commandMode);
   body.append("command", document.querySelector("input[name='command']:checked").value);
   body.append("image", imageInput.files[0]);
   body.append("conf", document.getElementById("confInput").value || "0.15");
@@ -233,63 +226,12 @@ async function runPipeline() {
   } catch (error) {
     showError(error.message);
   } finally {
-    micButton.disabled = false;
     runButton.disabled = false;
     document.querySelectorAll("input[name='command']").forEach((input) => {
       input.disabled = false;
     });
   }
 }
-
-micButton.addEventListener("click", async () => {
-  const body = new FormData();
-  body.append("record_seconds", recordSeconds.value || "2.5");
-  body.append("sample_rate", "16000");
-  let continuedAfterMic = false;
-
-  setBusy(true, "录音中");
-  startSlowProgress(10, 45, "正在录音并识别语音命令");
-  micResult.textContent = `请在 ${recordSeconds.value || "2.5"} 秒内说出 go / stop / yes / no。`;
-
-  try {
-    const response = await fetch("/api/mic", { method: "POST", body });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || "语音识别失败");
-    }
-    commandMode = "mic";
-    stopProgressTimer();
-    setProgress(50, "语音命令识别完成");
-    updateCommand(data.command);
-    micResult.textContent = `语音识别完成：${data.command.command} / ${data.command.meaning}，录音保存为 ${data.wav_path}`;
-    setStatus("语音完成");
-
-    const commandValue = data.command.command;
-    if (commandValue === "yes" || commandValue === "no") {
-      continuedAfterMic = true;
-      await sendAlarmAction(commandValue);
-      return;
-    }
-    if (imageInput.files && imageInput.files.length > 0) {
-      micResult.textContent += "，已自动进入检测流程。";
-      continuedAfterMic = true;
-      await runPipeline();
-      return;
-    }
-    micResult.textContent += "。请先选择图片，再点击运行完整流程。";
-  } catch (error) {
-    showError(error.message);
-  } finally {
-    micButton.disabled = false;
-    runButton.disabled = false;
-    document.querySelectorAll("input[name='command']").forEach((input) => {
-      input.disabled = false;
-    });
-    if (!continuedAfterMic && !statusBadge.classList.contains("error")) {
-      setStatus("就绪");
-    }
-  }
-});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();

@@ -14,14 +14,10 @@ from main_pipeline import (
     ALARM_REPORT,
     COMMAND_MEANINGS,
     COMMAND_JSON,
-    DEFAULT_SPEECH_CKPT,
     DEFAULT_YOLO_MODEL,
     DETECTION_JSON,
     IMAGE_UNIFIED_ALARM,
-    MIC_COMMAND_WAV,
     PROJECT_ROOT,
-    record_microphone,
-    run_speech_prediction,
     validate_detection_inputs,
     write_manual_command,
     write_skipped_alarm_report,
@@ -286,46 +282,17 @@ def output_file(filename: str):
     return send_from_directory(OUTPUTS_DIR, filename)
 
 
-@app.post("/api/mic")
-def api_mic():
-    try:
-        seconds = float(request.form.get("record_seconds", 2.5))
-        sample_rate = int(request.form.get("sample_rate", 16000))
-        with pipeline_lock:
-            record_microphone(MIC_COMMAND_WAV, seconds=seconds, sample_rate=sample_rate)
-            run_speech_prediction(PROJECT_ROOT, MIC_COMMAND_WAV, DEFAULT_SPEECH_CKPT, COMMAND_JSON)
-            command = read_command(COMMAND_JSON)
-            if not command:
-                raise ValueError("语音识别完成，但 command.json 为空或读取失败。")
-        return jsonify(
-            {
-                "ok": True,
-                "message": "语音命令识别完成。",
-                "command": command,
-                "wav_path": display_path(MIC_COMMAND_WAV),
-            }
-        )
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
 @app.post("/api/run")
 def api_run():
     try:
-        mode = request.form.get("mode", "manual")
         command_value = request.form.get("command", "go")
         conf = float(request.form.get("conf", 0.15))
 
         with pipeline_lock:
             image_path = save_uploaded_image()
 
-            if mode == "mic":
-                command = read_command(COMMAND_JSON)
-                if not command:
-                    raise ValueError("请先点击麦克风识别，生成语音命令后再运行检测。")
-            else:
-                write_manual_command(command_value)
-                command = read_command(COMMAND_JSON)
+            write_manual_command(command_value)
+            command = read_command(COMMAND_JSON)
 
             if not should_start_detection(command):
                 make_skipped_json(

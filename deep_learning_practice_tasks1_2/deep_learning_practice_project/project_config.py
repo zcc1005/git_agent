@@ -36,11 +36,3 @@ YOLO_MODEL_PATH = env_path(
     "YOLO_MODEL_PATH",
     YOLO_RUN_DIR / YOLO_RUN_NAME / "weights" / "best.pt",
 )
-
-SPEECH_DATA_DIR = env_path("SPEECH_DATA_DIR", DATA_DIR / "speech_commands")
-SPEECH_RUN_DIR = env_path("SPEECH_RUN_DIR", RUNS_DIR / "speech_transformer")
-SPEECH_CKPT_PATH = env_path("SPEECH_CKPT_PATH", SPEECH_RUN_DIR / "best_model.pt")
-
-ALARM_DATASET_PATH = env_path("ALARM_DATASET_PATH", PROJECT_ROOT / "task3_alarm" / "alarm_train_100.jsonl")
-ALARM_ADAPTER_DIR = env_path("ALARM_ADAPTER_DIR", OUTPUTS_DIR / "task3_alarm" / "qwen_alarm_lora")
-QWEN_MODEL_NAME = env_text("QWEN_MODEL_NAME", "Qwen/Qwen2.5-0.5B-Instruct")

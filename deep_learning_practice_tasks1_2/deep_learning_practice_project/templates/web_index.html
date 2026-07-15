@@ -11,7 +11,7 @@
     <header class="topbar">
       <div>
         <h1>工业皮带异物检测与智能报警系统</h1>
-        <p>任务1 语音/命令识别 · 任务2 YOLO 异物检测 · 任务3 统一结构与规则报警</p>
+        <p>手动检测控制 · YOLO 异物检测 · 统一结构与规则报警</p>
       </div>
       <div id="statusBadge" class="status-badge">就绪</div>
     </header>
@@ -23,7 +23,7 @@
 
     <section id="imageMode" class="workspace mode-panel active">
       <form id="pipelineForm" class="control-panel">
-        <div class="section-title">任务1 · 输入命令</div>
+        <div class="section-title">检测与报警控制</div>
         <div class="segmented" role="radiogroup" aria-label="手动命令">
           <label><input type="radio" name="command" value="go" checked><span>go</span></label>
           <label><input type="radio" name="command" value="stop"><span>stop</span></label>
@@ -31,16 +31,9 @@
           <label><input type="radio" name="command" value="no"><span>no</span></label>
         </div>
 
-        <div class="mic-row">
-          <button id="micButton" type="button" class="secondary-button">麦克风识别</button>
-          <label class="small-field">
-            <span>录音秒数</span>
-            <input id="recordSeconds" type="number" min="0.5" step="0.5" value="2.5">
-          </label>
-        </div>
-        <div id="micResult" class="hint">可手动选择命令，也可点击麦克风识别。</div>
+        <div id="commandHint" class="hint">当前使用手动控制；自然语言智能体入口将在后续阶段接入。</div>
 
-        <div class="section-title">任务2 · 选择图片</div>
+        <div class="section-title">选择图片</div>
         <label class="file-picker">
           <input id="imageInput" name="image" type="file" accept="image/*" required>
           <span>选择需要检测的图片</span>
@@ -61,15 +54,15 @@
         <div class="section-title">流程状态</div>
         <div class="step-grid">
           <div class="step-card">
-            <strong>任务1</strong>
+            <strong>控制</strong>
             <span id="commandSummary">等待命令</span>
           </div>
           <div class="step-card">
-            <strong>任务2</strong>
+            <strong>检测</strong>
             <span id="detectionSummary">等待检测</span>
           </div>
           <div class="step-card">
-            <strong>任务3</strong>
+            <strong>报警</strong>
             <span id="alarmSummary">等待报告</span>
           </div>
         </div>

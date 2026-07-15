@@ -1,10 +1,11 @@
-# 深度学习实践：语音指令驱动的工业皮带异物检测与智能报警系统
+# 工业皮带异物检测与智能报警系统
 
-本项目包含三个任务：
+当前系统包含两项核心能力：
 
-- 任务一：基于 Transformer Encoder 的语音命令识别，输出 `outputs/command.json`。
-- 任务二：基于 YOLOv8 的工业皮带五类异物检测，类别为 `unknown/stone/plastic/metal/wood`，输出 `outputs/detection.json` 和 `outputs/detections_vis/`。
-- 任务三：基于 LoRA 微调 `Qwen/Qwen2.5-0.5B-Instruct`，读取 `outputs/detection.json`，生成工业报警报告 `outputs/alarm_report.txt`。
+- 异物检测：基于 YOLOv8 识别 `unknown/stone/plastic/metal/wood`，支持图片和视频。
+- 规则报警：将检测结果转换为统一事件 JSON，通过确定性规则生成风险等级、处置动作和报警报告。
+
+旧的 `go/stop/yes/no` 语音关键词模型和 LoRA-Qwen 报告链路已下线。网页暂时保留手动检测与报警控制，后续由自然语言智能体入口替代。
 
 ## 1. 环境安装
 
@@ -18,47 +19,17 @@ pip install -r requirements.txt
 
 ```powershell
 $env:YOLO_MODEL_PATH="models/yolo/best.pt"
-$env:QWEN_MODEL_NAME="models/Qwen2.5-0.5B-Instruct"
 ```
 
-任务三额外依赖如下，如果当前环境尚未安装，可以单独执行：
+项目目录边界和后续迁移顺序见：
 
-```bash
-pip install transformers datasets peft accelerate safetensors sentencepiece protobuf
-```
+[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
 
-如果 `torch/torchaudio` 安装较慢，建议先根据自己的 CUDA 或 CPU 环境安装 PyTorch，再安装其余依赖。
+统一约定：`data/` 保存输入数据，`outputs/` 保存运行结果，`runs/` 保存训练产物，`models/` 只保存最终部署权重，回归测试统一放在 `tests/`。
 
-## 2. 任务一：语音命令识别
+如果 `torch` 安装较慢，建议先根据自己的 CUDA 或 CPU 环境安装 PyTorch，再安装其余依赖。
 
-Google Speech Commands 对应关系：
-
-| 数据集命令 | 中文含义 | 输出 command |
-| --- | --- | --- |
-| go | 开始检测 | go |
-| stop | 停止检测 | stop |
-| yes | 确认报警 | yes |
-| no | 取消报警 | no |
-
-训练 Transformer 语音模型：
-
-```bash
-python task1_speech/train_speech_transformer.py --epochs 10 --batch_size 64
-```
-
-使用 wav 文件预测并输出 `outputs/command.json`：
-
-```bash
-python task1_speech/predict_command.py --wav your_audio.wav
-```
-
-使用电脑麦克风录音识别：
-
-```bash
-python task1_speech/record_and_recognize.py --seconds 1.0
-```
-
-## 3. 任务二：YOLO 异物检测
+## 2. YOLO 异物检测
 
 原始图片压缩包位于：
 
@@ -130,118 +101,72 @@ outputs/detection.json
 outputs/detections_vis/
 ```
 
-## 4. 任务三：LoRA-Qwen 工业报警文本生成
+## 3. 统一事件与规则报警
 
 任务三目标：
 
-- 读取任务二生成的 `outputs/detection.json`。
-- 使用 LoRA 微调后的 `Qwen/Qwen2.5-0.5B-Instruct` 生成工业报警报告。
-- 输出 `outputs/alarm_report.txt`。
+- 将图片或视频检测结果转换成统一报警结构。
+- 对每个事件执行确定性风险分级，整体风险取最高事件等级。
+- 输出完整统一 JSON 和可读的文本报警报告。
+- 规则报告不依赖 LoRA、千问模型或网络连接。
 
-训练数据位于：
+图片检测结果执行规则评估：
+
+```powershell
+python -m task3_alarm.alarm_rule_engine `
+  --input outputs/detection.json `
+  --source-type image `
+  --output-json outputs/unified_alarm_image.json `
+  --output-txt outputs/alarm_report.txt
+```
+
+视频检测结果执行规则评估：
+
+```powershell
+python -m task3_alarm.alarm_rule_engine `
+  --input outputs/video_detections/<任务目录>/detection_results.json `
+  --source-type video `
+  --output-json outputs/video_detections/<任务目录>/unified_alarm.json `
+  --output-txt outputs/video_detections/<任务目录>/alarm_report.txt
+```
+
+主要输出：
 
 ```text
-task3_alarm/alarm_train_100.jsonl
+events[].risk：逐事件风险和动作
+overall_risk：本次检测的总体风险
+generated_report：结论、风险说明和处理建议
+alarm_report.txt：确定性规则报告
 ```
 
-每条样本字段为：
+运行全部回归测试：
 
-```text
-instruction：任务说明
-input：检测 JSON 字符串
-output：人工编写的标准报警报告
+```powershell
+python -m unittest discover -s tests -v
 ```
 
-检查训练数据格式、类别分布和风险等级分布：
+## 4. 一键流程
 
-```bash
-python task3_alarm/inspect_alarm_dataset.py
+准备好 YOLO 权重后，可以运行图片完整流程：
+
+```powershell
+python main_pipeline.py --command go --source data/yolo_yiwu/images/test
 ```
 
-LoRA 微调：
+启动支持图片和视频检测的网页：
 
-```bash
-python task3_alarm/train_lora_qwen.py
+```powershell
+python web_app.py
 ```
 
-默认训练配置：
-
-```text
-基础模型：Qwen/Qwen2.5-0.5B-Instruct
-epoch：8
-batch size：1
-gradient accumulation：8
-learning rate：2e-4
-max sequence length：1024
-LoRA target modules：q_proj, k_proj, v_proj, o_proj
-```
-
-Windows + RTX 4050 Laptop GPU 显存有限，如果显存不足，可降低序列长度：
-
-```bash
-python task3_alarm/train_lora_qwen.py --max_seq_length 768
-python task3_alarm/train_lora_qwen.py --max_seq_length 512
-```
-
-LoRA 推理生成报警报告：
-
-```bash
-python task3_alarm/generate_alarm_qwen_lora.py
-```
-
-原始 Qwen 对比生成：
-
-```bash
-python task3_alarm/generate_alarm_base_qwen.py
-```
-
-任务三输出文件：
-
-```text
-outputs/task3_alarm/qwen_alarm_lora：LoRA 适配器和 tokenizer
-outputs/alarm_report.txt：LoRA 模型生成的报警报告
-outputs/alarm_report_base_qwen.txt：原始 Qwen 生成的对比报告
-```
-
-注意：LoRA adapter 不能单独运行，推理时必须同时加载 Qwen2.5-0.5B-Instruct 基础模型和 `outputs/task3_alarm/qwen_alarm_lora` 适配器。
-
-如果无法联网下载 Qwen 模型，请先联网下载，或把模型提前放到本地路径并用 `--model_name_or_path` 指定：
-
-```bash
-$env:QWEN_MODEL_NAME="models/Qwen2.5-0.5B-Instruct"
-python task3_alarm/train_lora_qwen.py
-python task3_alarm/generate_alarm_qwen_lora.py
-```
-
-## 5. 一键流程
-
-如果已经完成任务一模型、任务二模型和任务三 LoRA 训练，可以运行：
-
-```bash
-python main_pipeline.py --command go --source data/yolo_yiwu/images/test --run_alarm
-```
-
-完整作业流程建议：
-
-```bash
-python task1_speech/train_speech_transformer.py --epochs 10 --batch_size 64
-python task1_speech/record_and_recognize.py --seconds 1.0
-python task2_yolo/prepare_yolo_dataset.py
-python task2_yolo/annotate_yiwu.py --split train
-python task2_yolo/annotate_yiwu.py --split val
-python task2_yolo/train_yolo.py --epochs 50 --imgsz 640 --batch 8
-python task2_yolo/detect_yolo.py --source data/yolo_yiwu/images/test
-python task3_alarm/inspect_alarm_dataset.py
-python task3_alarm/train_lora_qwen.py
-python task3_alarm/generate_alarm_qwen_lora.py
-```
+浏览器访问 `http://127.0.0.1:5000`。
 
 最终链路：
 
 ```text
-任务一 command.json
+手动检测控制
 ↓
-任务二 detection.json + detections_vis
+detection.json + detections_vis
 ↓
-任务三 alarm_report.txt
+unified_alarm.json + alarm_report.txt
 ```
