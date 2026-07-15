@@ -61,3 +61,9 @@ Thumbs.db
 desktop.ini
 .vscode/
 .idea/
+
+# Keep generated runs ignored, but allow YOLO training outputs and weights.
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/*
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/**
