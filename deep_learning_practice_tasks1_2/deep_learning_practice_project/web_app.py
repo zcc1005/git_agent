@@ -14,22 +14,20 @@ from main_pipeline import (
     ALARM_REPORT,
     COMMAND_MEANINGS,
     COMMAND_JSON,
-    DEFAULT_ADAPTER_DIR,
-    DEFAULT_QWEN_MODEL,
     DEFAULT_SPEECH_CKPT,
     DEFAULT_YOLO_MODEL,
     DETECTION_JSON,
+    IMAGE_UNIFIED_ALARM,
     MIC_COMMAND_WAV,
     PROJECT_ROOT,
     record_microphone,
     run_speech_prediction,
     validate_detection_inputs,
-    validate_lora_adapter,
     write_manual_command,
     write_skipped_alarm_report,
 )
 from task2_yolo.detect_yolo import detect_yiwu, make_skipped_json, read_command, should_start_detection
-from task3_alarm.generate_alarm_qwen_lora import generate_alarm_report
+from task3_alarm.alarm_rule_engine import complete_detection_alarm
 from video_detection import (
     DEFAULT_DUPLICATE_IOU,
     DEFAULT_EVENT_SILENCE_SECONDS,
@@ -180,6 +178,10 @@ def build_video_response(result: Dict[str, Any]) -> Dict[str, Any]:
         "class_counts": result["class_counts"],
         "events": events,
         "result_json": result["result_json"],
+        "alarm_result_json": result.get("alarm_result_json", ""),
+        "alarm_report_path": result.get("alarm_report_path", ""),
+        "overall_risk": result.get("overall_risk", {}),
+        "alarm_report": result.get("alarm_report", ""),
         "thresholds": result.get("thresholds", {}),
         "temporal_parameters": result.get("temporal_parameters", {}),
         "inference_parameters": result.get("inference_parameters", {}),
@@ -190,6 +192,7 @@ def build_response(image_path: Path | None = None) -> Dict[str, Any]:
     command = read_command(COMMAND_JSON)
     detection = read_json_file(DETECTION_JSON)
     alarm_text = read_text_file(ALARM_REPORT)
+    unified_alarm = read_json_file(IMAGE_UNIFIED_ALARM)
     vis_image = find_visualization_image(image_path) if image_path else find_latest_visualization_image()
 
     return {
@@ -207,10 +210,15 @@ def build_response(image_path: Path | None = None) -> Dict[str, Any]:
             "output": display_path(DETECTION_JSON),
         },
         "alarm_report": alarm_text,
+        "alarm": {
+            "overall_risk": unified_alarm.get("overall_risk", {}),
+            "generated_report": unified_alarm.get("generated_report", {}),
+        },
         "paths": {
             "command_json": display_path(COMMAND_JSON),
             "detection_json": display_path(DETECTION_JSON),
             "alarm_report": display_path(ALARM_REPORT),
+            "unified_alarm": display_path(IMAGE_UNIFIED_ALARM),
             "input_image": display_path(image_path) if image_path else "",
             "visualization_image": display_path(vis_image) if vis_image else "",
         },
@@ -307,8 +315,6 @@ def api_run():
         mode = request.form.get("mode", "manual")
         command_value = request.form.get("command", "go")
         conf = float(request.form.get("conf", 0.15))
-        top_k = int(request.form.get("top_k", 5))
-        qwen_device = request.form.get("qwen_device", "cpu")
 
         with pipeline_lock:
             image_path = save_uploaded_image()
@@ -339,14 +345,12 @@ def api_run():
                 conf=conf,
             )
 
-            validate_lora_adapter(DEFAULT_ADAPTER_DIR)
-            generate_alarm_report(
-                detection_json=DETECTION_JSON,
-                adapter_dir=DEFAULT_ADAPTER_DIR,
+            complete_detection_alarm(
+                read_json_file(DETECTION_JSON),
+                input_json=DETECTION_JSON,
+                output_json=IMAGE_UNIFIED_ALARM,
                 output_txt=ALARM_REPORT,
-                model_name_or_path=DEFAULT_QWEN_MODEL,
-                top_k=top_k,
-                qwen_device=qwen_device,
+                source_type="image",
             )
             save_active_alarm_report()
 
@@ -424,6 +428,20 @@ def api_video_detect():
                 track_center_distance_ratio=track_center_distance_ratio,
                 roi=roi,
             )
+            result_json = output_dir / "detection_results.json"
+            alarm_result_json = output_dir / "unified_alarm.json"
+            alarm_report_path = output_dir / "alarm_report.txt"
+            ruled_alarm, alarm_report = complete_detection_alarm(
+                result,
+                input_json=result_json,
+                output_json=alarm_result_json,
+                output_txt=alarm_report_path,
+                source_type="video",
+            )
+            result["alarm_result_json"] = display_path(alarm_result_json)
+            result["alarm_report_path"] = display_path(alarm_report_path)
+            result["overall_risk"] = ruled_alarm["overall_risk"]
+            result["alarm_report"] = alarm_report
         return jsonify({"ok": True, "video_detection": build_video_response(result)})
     except (ValueError, FileNotFoundError) as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

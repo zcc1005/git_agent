@@ -35,11 +35,14 @@ const videoUniqueObjects = document.getElementById("videoUniqueObjects");
 const videoPositiveFrames = document.getElementById("videoPositiveFrames");
 const videoCandidateFrames = document.getElementById("videoCandidateFrames");
 const videoSampledFrames = document.getElementById("videoSampledFrames");
+const videoOverallRisk = document.getElementById("videoOverallRisk");
 const videoClassSummary = document.getElementById("videoClassSummary");
 const videoResultMessage = document.getElementById("videoResultMessage");
 const videoEventRows = document.getElementById("videoEventRows");
 const videoGallery = document.getElementById("videoGallery");
 const videoResultPath = document.getElementById("videoResultPath");
+const videoAlarmPath = document.getElementById("videoAlarmPath");
+const videoAlarmReport = document.getElementById("videoAlarmReport");
 
 let commandMode = "manual";
 let progressTimer = null;
@@ -129,7 +132,11 @@ function updateResult(data) {
   detectionSummary.textContent = `${detection.num_images || 0} 张图片，${detection.num_detections || 0} 个目标，异物：${Boolean(hasForeignObject)}，类型：${classSummary}`;
   detectionJson.textContent = prettyJson(detection);
 
-  alarmSummary.textContent = data.alarm_report ? "报警报告已生成" : "未生成报警报告";
+  const riskLevelNames = { none: "无报警", low: "低风险", medium: "中风险", high: "高风险" };
+  const overallRisk = data.alarm?.overall_risk || {};
+  alarmSummary.textContent = data.alarm_report
+    ? `规则报告已生成 · ${riskLevelNames[overallRisk.level] || overallRisk.level || "待评估"}`
+    : "未生成报警报告";
   alarmReport.textContent = data.alarm_report || "无报警报告内容";
   alarmPath.textContent = data.paths?.alarm_report || "";
   imagePath.textContent = data.paths?.visualization_image || "";
@@ -208,14 +215,12 @@ async function runPipeline() {
   body.append("command", document.querySelector("input[name='command']:checked").value);
   body.append("image", imageInput.files[0]);
   body.append("conf", document.getElementById("confInput").value || "0.15");
-  body.append("top_k", document.getElementById("topKInput").value || "5");
-  body.append("qwen_device", document.getElementById("qwenDevice").value || "cpu");
 
   setBusy(true, "流程运行中");
   startSlowProgress(15, 92, "正在运行完整流程");
   commandSummary.textContent = "正在处理命令...";
   detectionSummary.textContent = "正在执行 YOLO 检测...";
-  alarmSummary.textContent = "等待 LoRA-Qwen 生成...";
+  alarmSummary.textContent = "等待规则引擎评估...";
 
   try {
     const response = await fetch("/api/run", { method: "POST", body });
@@ -340,8 +345,12 @@ function updateVideoResult(data) {
   videoPositiveFrames.textContent = String(data.positive_frames || 0);
   videoCandidateFrames.textContent = String(data.candidate_frames || 0);
   videoSampledFrames.textContent = String(data.sampled_frames || 0);
+  const videoRiskNames = { none: "无报警", low: "低风险", medium: "中风险", high: "高风险" };
+  videoOverallRisk.textContent = videoRiskNames[data.overall_risk?.level] || data.overall_risk?.level || "待评估";
   videoClassSummary.textContent = formatClassCounts(data.class_counts).replaceAll("，", " / ");
   videoResultPath.textContent = data.result_json || "";
+  videoAlarmPath.textContent = data.alarm_report_path || "";
+  videoAlarmReport.textContent = data.alarm_report || "没有生成视频报警报告";
   videoEventRows.replaceChildren();
   videoGallery.replaceChildren();
 

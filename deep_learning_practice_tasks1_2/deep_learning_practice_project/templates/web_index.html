@@ -11,7 +11,7 @@
     <header class="topbar">
       <div>
         <h1>工业皮带异物检测与智能报警系统</h1>
-        <p>任务1 语音/命令识别 · 任务2 YOLO 异物检测 · 任务3 LoRA-Qwen 报警生成</p>
+        <p>任务1 语音/命令识别 · 任务2 YOLO 异物检测 · 任务3 统一结构与规则报警</p>
       </div>
       <div id="statusBadge" class="status-badge">就绪</div>
     </header>
@@ -51,18 +51,6 @@
           <label>
             <span>YOLO 置信度</span>
             <input id="confInput" name="conf" type="number" min="0.01" max="1" step="0.01" value="0.15">
-          </label>
-          <label>
-            <span>报警 Top K</span>
-            <input id="topKInput" name="top_k" type="number" min="1" max="20" step="1" value="5">
-          </label>
-          <label>
-            <span>Qwen 设备</span>
-            <select id="qwenDevice" name="qwen_device">
-              <option value="cpu" selected>cpu</option>
-              <option value="auto">auto</option>
-              <option value="cuda">cuda</option>
-            </select>
           </label>
         </div>
 
@@ -225,6 +213,7 @@
           <div><strong id="videoPositiveFrames">0</strong><span>确认命中帧</span></div>
           <div><strong id="videoCandidateFrames">0</strong><span>候选调试帧</span></div>
           <div><strong id="videoSampledFrames">0</strong><span>YOLO 检测帧</span></div>
+          <div><strong id="videoOverallRisk">无报警</strong><span>总体风险</span></div>
           <div><strong id="videoClassSummary">无</strong><span>异物类别</span></div>
         </div>
 
@@ -248,6 +237,14 @@
             <tbody id="videoEventRows"></tbody>
           </table>
         </div>
+
+        <section class="output-block video-alarm-block">
+          <div class="block-head">
+            <h2>视频规则报警报告</h2>
+            <span id="videoAlarmPath"></span>
+          </div>
+          <pre id="videoAlarmReport">视频检测完成后显示规则引擎报告</pre>
+        </section>
 
         <section class="video-gallery-section">
           <div class="block-head">
