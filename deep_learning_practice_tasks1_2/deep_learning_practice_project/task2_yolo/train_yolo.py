@@ -79,7 +79,7 @@ def main() -> None:
         default="yolov8s.pt",
         help="Model checkpoint, for example yolov8n.pt or yolov8s.pt.",
     )
-    parser.add_argument("--epochs", type=int, default=80)
+    parser.add_argument("--epochs", type=int, default=120)
     parser.add_argument("--imgsz", type=int, default=800)
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--device", type=str, default=None, help="Example: 0 or cpu.")
