@@ -31,7 +31,9 @@ const videoProgressFill = document.getElementById("videoProgressFill");
 const videoProgressText = document.getElementById("videoProgressText");
 const videoProgressPercent = document.getElementById("videoProgressPercent");
 const videoEventCount = document.getElementById("videoEventCount");
+const videoUniqueObjects = document.getElementById("videoUniqueObjects");
 const videoPositiveFrames = document.getElementById("videoPositiveFrames");
+const videoCandidateFrames = document.getElementById("videoCandidateFrames");
 const videoSampledFrames = document.getElementById("videoSampledFrames");
 const videoClassSummary = document.getElementById("videoClassSummary");
 const videoResultMessage = document.getElementById("videoResultMessage");
@@ -334,7 +336,9 @@ function updateVideoResult(data) {
   stopVideoProgress();
   setVideoProgress(100, "视频检测完成");
   videoEventCount.textContent = String(data.num_events || 0);
+  videoUniqueObjects.textContent = String(data.unique_object_count || 0);
   videoPositiveFrames.textContent = String(data.positive_frames || 0);
+  videoCandidateFrames.textContent = String(data.candidate_frames || 0);
   videoSampledFrames.textContent = String(data.sampled_frames || 0);
   videoClassSummary.textContent = formatClassCounts(data.class_counts).replaceAll("，", " / ");
   videoResultPath.textContent = data.result_json || "";
@@ -343,7 +347,7 @@ function updateVideoResult(data) {
 
   if (!data.has_foreign_object) {
     videoResultMessage.className = "video-result-message no-detection";
-    videoResultMessage.textContent = `检测完成：共按 ${data.sample_fps} FPS 检测 ${data.sampled_frames} 帧，未发现异物。`;
+    videoResultMessage.textContent = `检测完成：共按 ${data.sample_fps} FPS 检测 ${data.sampled_frames} 帧，没有确认异物。保留 ${data.candidate_frames || 0} 张候选调试帧，候选不会触发报警。`;
     const placeholder = document.createElement("div");
     placeholder.className = "gallery-placeholder";
     placeholder.textContent = "本次没有检测到异物，因此没有保存图片";
@@ -352,26 +356,36 @@ function updateVideoResult(data) {
   }
 
   videoResultMessage.className = "video-result-message";
-  videoResultMessage.textContent = `检测到 ${data.num_events} 个异物出现时间段，共保存 ${data.saved_images} 张命中帧。表中的数量是该时间段内单帧最大同时异物数。`;
+  videoResultMessage.textContent = `检测到 ${data.num_events} 个异物时间段、${data.unique_object_count} 个跟踪独立目标；共保存 ${data.saved_images} 张原始命中或候选调试帧，其中 ${data.positive_frames} 张包含确认目标。`;
 
   data.events.forEach((event) => {
     const row = document.createElement("tr");
     appendCell(row, String(event.event_id));
     appendCell(row, `${event.start_video_time} 至 ${event.end_video_time}`);
     appendCell(row, `${event.start_real_time} 至 ${event.end_real_time}`);
-    appendCell(row, String(event.object_count));
+    appendCell(row, String(event.max_simultaneous_objects ?? event.object_count ?? 0));
+    appendCell(row, String(event.unique_object_count ?? event.object_count ?? 0));
+    appendCell(row, String(event.positive_sample_count || 0));
     appendCell(row, formatClassCounts(event.class_counts));
     appendCell(row, Number(event.max_confidence).toFixed(2));
+    appendCell(row, String(event.key_frames?.length || (event.key_frame_url ? 1 : 0)));
     videoEventRows.appendChild(row);
 
-    const figure = document.createElement("figure");
-    const image = document.createElement("img");
-    image.src = `${event.key_frame_url}?t=${Date.now()}`;
-    image.alt = `异物事件 ${event.event_id} 关键帧`;
-    const caption = document.createElement("figcaption");
-    caption.textContent = `时间段 ${event.event_id} · ${event.start_real_time} 至 ${event.end_real_time} · ${formatClassCounts(event.class_counts)}`;
-    figure.append(image, caption);
-    videoGallery.appendChild(figure);
+    const keyFrames = event.key_frames?.length
+      ? event.key_frames
+      : [{ image_url: event.key_frame_url, track_ids: event.track_ids || [], class_counts: event.class_counts }];
+    keyFrames.forEach((keyFrame, frameIndex) => {
+      if (!keyFrame.image_url) return;
+      const figure = document.createElement("figure");
+      const image = document.createElement("img");
+      image.src = `${keyFrame.image_url}?t=${Date.now()}`;
+      image.alt = `异物事件 ${event.event_id} 代表帧 ${frameIndex + 1}`;
+      const caption = document.createElement("figcaption");
+      const trackText = keyFrame.track_ids?.length ? `轨迹 ${keyFrame.track_ids.join(", ")}` : "轨迹未记录";
+      caption.textContent = `事件 ${event.event_id} · 代表帧 ${frameIndex + 1} · ${keyFrame.video_time || event.start_video_time} · ${trackText} · ${formatClassCounts(keyFrame.class_counts || event.class_counts)}`;
+      figure.append(image, caption);
+      videoGallery.appendChild(figure);
+    });
   });
 }
 

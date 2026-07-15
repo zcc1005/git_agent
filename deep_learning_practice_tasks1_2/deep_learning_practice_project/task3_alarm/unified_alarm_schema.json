@@ -1,0 +1,417 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/unified-alarm-1.0.json",
+  "title": "工业皮带异物统一报警事件",
+  "description": "图片和视频检测共用的报警事实结构。风险与报告字段在后续阶段填充。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_id",
+    "created_at",
+    "source",
+    "detection_summary",
+    "events",
+    "overall_risk",
+    "generated_report",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "report_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "detection_summary": {
+      "$ref": "#/$defs/detectionSummary"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    },
+    "overall_risk": {
+      "$ref": "#/$defs/risk"
+    },
+    "generated_report": {
+      "$ref": "#/$defs/generatedReport"
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    }
+  },
+  "$defs": {
+    "nullableString": {
+      "type": ["string", "null"]
+    },
+    "nullableNumber": {
+      "type": ["number", "null"]
+    },
+    "stringCountMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "name",
+        "path",
+        "start_real_time",
+        "end_real_time",
+        "duration_seconds"
+      ],
+      "properties": {
+        "type": {
+          "enum": ["image", "video"]
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "start_real_time": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "end_real_time": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "duration_seconds": {
+          "$ref": "#/$defs/nullableNumber"
+        }
+      }
+    },
+    "detectionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "has_foreign_object",
+        "event_count",
+        "detection_box_count",
+        "positive_frame_count",
+        "class_counts"
+      ],
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "has_foreign_object": {
+          "type": "boolean"
+        },
+        "event_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "detection_box_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "positive_frame_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "class_counts": {
+          "$ref": "#/$defs/stringCountMap"
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "event_type",
+        "start_offset_seconds",
+        "end_offset_seconds",
+        "start_video_time",
+        "end_video_time",
+        "start_real_time",
+        "end_real_time",
+        "duration_seconds",
+        "key_frame",
+        "evidence_frames",
+        "objects",
+        "detection_summary",
+        "risk"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "event_type": {
+          "enum": ["image_detection", "video_detection"]
+        },
+        "start_offset_seconds": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "end_offset_seconds": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "start_video_time": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "end_video_time": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "start_real_time": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "end_real_time": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "duration_seconds": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "key_frame": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "evidence_frames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/detectedObject"
+          }
+        },
+        "detection_summary": {
+          "$ref": "#/$defs/eventDetectionSummary"
+        },
+        "risk": {
+          "$ref": "#/$defs/risk"
+        }
+      }
+    },
+    "eventDetectionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "detection_box_count",
+        "reported_peak_box_count",
+        "unique_object_count",
+        "positive_sample_count",
+        "track_ids",
+        "class_counts",
+        "observed_classes",
+        "max_confidence"
+      ],
+      "properties": {
+        "detection_box_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reported_peak_box_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unique_object_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "positive_sample_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "track_ids": {
+          "type": "array",
+          "items": {
+            "type": ["integer", "string"]
+          },
+          "uniqueItems": true
+        },
+        "class_counts": {
+          "$ref": "#/$defs/stringCountMap"
+        },
+        "observed_classes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "max_confidence": {
+          "$ref": "#/$defs/nullableNumber"
+        }
+      }
+    },
+    "detectedObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "object_id",
+        "track_id",
+        "source_frame",
+        "class_id",
+        "class",
+        "class_name",
+        "confidence",
+        "bbox_xyxy",
+        "area",
+        "position",
+        "position_basis",
+        "rejected_as_unknown",
+        "predicted_class",
+        "predicted_class_name"
+      ],
+      "properties": {
+        "object_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "track_id": {
+          "type": ["string", "integer", "null"]
+        },
+        "source_frame": {
+          "type": "string"
+        },
+        "class_id": {
+          "type": ["integer", "null"]
+        },
+        "class": {
+          "type": "string"
+        },
+        "class_name": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "bbox_xyxy": {
+          "type": "array",
+          "prefixItems": [
+            {"type": "number"},
+            {"type": "number"},
+            {"type": "number"},
+            {"type": "number"}
+          ],
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "area": {
+          "type": "number",
+          "minimum": 0
+        },
+        "position": {
+          "type": "string"
+        },
+        "position_basis": {
+          "enum": ["input", "image_dimensions", "detection_extent", "unavailable"]
+        },
+        "rejected_as_unknown": {
+          "type": "boolean"
+        },
+        "predicted_class": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "predicted_class_name": {
+          "$ref": "#/$defs/nullableString"
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "level", "code", "reason", "requires_stop", "action_code"],
+      "properties": {
+        "status": {
+          "enum": ["pending", "completed"]
+        },
+        "level": {
+          "type": ["string", "null"]
+        },
+        "code": {
+          "type": ["string", "null"]
+        },
+        "reason": {
+          "type": ["string", "null"]
+        },
+        "requires_stop": {
+          "type": ["boolean", "null"]
+        },
+        "action_code": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "generatedReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "conclusion", "risk_explanation", "recommended_action", "generator"],
+      "properties": {
+        "status": {
+          "enum": ["pending", "completed", "failed"]
+        },
+        "conclusion": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "risk_explanation": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "recommended_action": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "generator": {
+          "$ref": "#/$defs/nullableString"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_format",
+        "input_json",
+        "model_path",
+        "thresholds",
+        "converter",
+        "conversion_warnings"
+      ],
+      "properties": {
+        "input_format": {
+          "enum": ["image_detection_v1", "video_detection_v1"]
+        },
+        "input_json": {
+          "type": "string"
+        },
+        "model_path": {
+          "type": "string"
+        },
+        "thresholds": {
+          "type": "object"
+        },
+        "converter": {
+          "const": "task3_alarm.unified_alarm/1.0"
+        },
+        "conversion_warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
