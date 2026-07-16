@@ -11,7 +11,9 @@ from web_app import app
 class FakeAgentService:
     def __init__(self) -> None:
         self.chat_calls = []
+        self.attachment_calls = []
         self.history_calls = []
+        self.history_messages = [{"role": "assistant", "content": "历史消息"}]
 
     def chat(self, message, *, session_id="default", context=None):
         self.chat_calls.append(
@@ -28,9 +30,36 @@ class FakeAgentService:
             "data": {},
         }
 
+    def receive_attachment(
+        self,
+        media_type,
+        media_path,
+        *,
+        session_id="default",
+        original_name="",
+        context=None,
+    ):
+        self.attachment_calls.append(
+            {
+                "media_type": media_type,
+                "media_path": media_path,
+                "session_id": session_id,
+                "original_name": original_name,
+                "context": context or {},
+            }
+        )
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "intent": "attachment_received",
+            "reply": f"我已接收到{'图片' if media_type == 'image' else '视频'}，请给我下一步指令。",
+            "data": {"media_type": media_type},
+            "attachment_received": True,
+        }
+
     def history(self, session_id="default", limit=50):
         self.history_calls.append({"session_id": session_id, "limit": limit})
-        return [{"role": "assistant", "content": "历史消息"}]
+        return self.history_messages
 
 
 class AgentWebIntegrationTests(unittest.TestCase):
@@ -66,7 +95,14 @@ class AgentWebIntegrationTests(unittest.TestCase):
 
     def test_chat_endpoint_saves_video_and_builds_context(self) -> None:
         saved_video = Path("outputs/uploaded_videos/saved.mp4")
-        with patch("web_app.save_uploaded_video", return_value=saved_video):
+        preview_assets = {
+            "preview_path": "outputs/agent_inputs/video_previews/saved_browser.mp4",
+            "poster_path": "outputs/agent_inputs/video_previews/saved_poster.jpg",
+        }
+        with (
+            patch("web_app.save_uploaded_video", return_value=saved_video),
+            patch("web_app.create_browser_video_assets", return_value=preview_assets),
+        ):
             response = self.client.post(
                 "/api/agent/chat",
                 data={
@@ -82,6 +118,7 @@ class AgentWebIntegrationTests(unittest.TestCase):
         context = self.service.chat_calls[0]["context"]
         self.assertEqual(context["video_path"], str(saved_video))
         self.assertEqual(context["video_start_time"], "2026-07-16T10:00:00")
+        self.assertEqual(context["_attachment_preview"], preview_assets)
 
     def test_chat_endpoint_routes_image_attachment(self) -> None:
         saved_image = Path("outputs/web_inputs/saved.jpg")
@@ -100,6 +137,26 @@ class AgentWebIntegrationTests(unittest.TestCase):
         context = self.service.chat_calls[0]["context"]
         self.assertEqual(context["image_path"], str(saved_image))
         self.assertNotIn("video_path", context)
+
+    def test_attachment_can_be_sent_without_a_text_instruction(self) -> None:
+        saved_image = Path("outputs/agent_inputs/images/saved.jpg")
+        with patch("web_app.save_uploaded_image_file", return_value=saved_image):
+            response = self.client.post(
+                "/api/agent/chat",
+                data={
+                    "message": "",
+                    "session_id": "attachment-session",
+                    "media": (io.BytesIO(b"fake-image"), "belt.jpg"),
+                },
+                content_type="multipart/form-data",
+            )
+
+        payload = response.get_json()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["attachment_received"])
+        self.assertEqual(payload["reply"], "我已接收到图片，请给我下一步指令。")
+        self.assertEqual(self.service.chat_calls, [])
+        self.assertEqual(self.service.attachment_calls[0]["media_path"], str(saved_image))
 
     def test_image_upload_with_long_name_is_safely_truncated(self) -> None:
         uploaded = Mock()
@@ -125,6 +182,34 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertEqual(
             self.service.history_calls[0], {"session_id": "web-session", "limit": 20}
         )
+
+    def test_history_endpoint_backfills_rule_generated_alarm_report(self) -> None:
+        self.service.history_messages = [
+            {
+                "role": "assistant",
+                "content": "检测完成",
+                "metadata": {"data": {"detection_id": "det-old"}},
+            }
+        ]
+        record = Mock(
+            alarm_report="二、报警结论\n高风险\n\n六、处理建议\n立即停机。",
+            source_type="video",
+            summary={
+                "events": [
+                    {"event_id": 1, "key_frame": "outputs/frames/event_1.jpg"}
+                ]
+            },
+        )
+        with patch(
+            "web_app.agent_history_store.get_detection", return_value=record
+        ):
+            response = self.client.get(
+                "/api/agent/history?session_id=web-session&limit=20"
+            )
+
+        data = response.get_json()["messages"][0]["metadata"]["data"]
+        self.assertIn("二、报警结论", data["alarm_report"])
+        self.assertEqual(data["event_frames"][0]["event_id"], 1)
 
     def test_invalid_chat_and_history_requests_return_400(self) -> None:
         empty_chat = self.client.post("/api/agent/chat", data={"message": ""})

@@ -99,18 +99,98 @@
   background: #fff4f3;
 }
 
-.agent-chat__result {
-  width: min(78%, 680px);
-  max-width: 680px;
+.agent-chat__message--pending {
+  color: var(--agent-muted);
+  background: #f7fbfa;
 }
 
-.agent-chat__result-image {
+.agent-chat__message--pending p {
+  animation: agent-chat-pulse 1s ease-in-out infinite;
+}
+
+@keyframes agent-chat-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+.agent-chat__message--media {
+  width: min(78%, 680px);
+  padding: 8px;
+}
+
+.agent-chat__media-preview {
+  overflow: hidden;
+  border-radius: 7px;
+  background: #101820;
+}
+
+.agent-chat__message--media p + .agent-chat__media-preview {
+  margin-top: 8px;
+}
+
+.agent-chat__media-preview img,
+.agent-chat__media-preview video {
   display: block;
   width: 100%;
   max-height: 440px;
   object-fit: contain;
+}
+
+.agent-chat__media-preview img {
+  background: #eef3f4;
+}
+
+.agent-chat__message--with-report {
+  width: min(86%, 820px);
+  max-width: 820px;
+  border-left: 4px solid var(--agent-accent);
+}
+
+.agent-chat__report-body {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--agent-border);
+}
+
+.agent-chat__report-body pre {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: #26343d;
+  font: inherit;
+  line-height: 1.75;
+}
+
+.agent-chat__report-body pre + pre {
+  margin-top: 12px;
+}
+
+.agent-chat__event-frame {
+  margin: 10px 0 18px;
+}
+
+.agent-chat__event-frame img {
+  display: block;
+  width: 100%;
+  max-height: 460px;
+  object-fit: contain;
   border-radius: 7px;
   background: #eef3f4;
+}
+
+.agent-chat__event-frame figcaption {
+  margin-top: 5px;
+  color: var(--agent-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.agent-chat__report-link {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--agent-accent-dark);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .agent-chat__quick-actions {
@@ -225,6 +305,10 @@
 @media (max-width: 640px) {
   .agent-chat__message {
     max-width: 90%;
+  }
+
+  .agent-chat__message--media {
+    width: 90%;
   }
 
   .agent-chat__header p {

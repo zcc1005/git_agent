@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
+import cv2
 from flask import Flask, jsonify, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
 
@@ -57,8 +58,107 @@ UPLOAD_DIR = OUTPUTS_DIR / "web_inputs"
 AGENT_IMAGE_UPLOAD_DIR = OUTPUTS_DIR / "agent_inputs" / "images"
 ACTIVE_ALARM_REPORT = OUTPUTS_DIR / "alarm_report_active.txt"
 VIDEO_DETECTIONS_DIR = OUTPUTS_DIR / "video_detections"
+AGENT_VIDEO_PREVIEW_DIR = OUTPUTS_DIR / "agent_inputs" / "video_previews"
 AGENT_HISTORY_DB = OUTPUTS_DIR / "agent_history.sqlite3"
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+
+def browser_video_asset_paths(video_path: Path) -> tuple[Path, Path]:
+    return (
+        AGENT_VIDEO_PREVIEW_DIR / f"{video_path.stem}_browser_h264_640.mp4",
+        AGENT_VIDEO_PREVIEW_DIR / f"{video_path.stem}_poster.jpg",
+    )
+
+
+def create_browser_video_assets(video_path: Path) -> Dict[str, str]:
+    """Build an H.264 visual proxy and poster without altering the detection input."""
+    AGENT_VIDEO_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    preview_path, poster_path = browser_video_asset_paths(video_path)
+    if preview_path.is_file() and poster_path.is_file():
+        return {"preview_path": str(preview_path), "poster_path": str(poster_path)}
+
+    capture = cv2.VideoCapture(str(video_path))
+    if not capture.isOpened():
+        raise ValueError("无法读取上传视频，不能生成浏览器预览")
+    writer = None
+    try:
+        source_fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
+        if source_fps <= 0 or source_fps > 240:
+            source_fps = 25.0
+        target_fps = min(source_fps, 24.0)
+        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        if width < 1 or height < 1:
+            raise ValueError("上传视频缺少有效画面尺寸")
+        scale = min(1.0, 640.0 / width)
+        preview_width = max(2, int(round(width * scale)) // 2 * 2)
+        preview_height = max(2, int(round(height * scale)) // 2 * 2)
+
+        preview_path.unlink(missing_ok=True)
+        writer_attempts = (
+            (cv2.CAP_MSMF, "avc1"),
+            (cv2.CAP_ANY, "avc1"),
+            (cv2.CAP_ANY, "H264"),
+        )
+        for api_preference, codec in writer_attempts:
+            candidate = cv2.VideoWriter(
+                str(preview_path),
+                api_preference,
+                cv2.VideoWriter_fourcc(*codec),
+                target_fps,
+                (preview_width, preview_height),
+            )
+            if candidate.isOpened():
+                writer = candidate
+                break
+            candidate.release()
+        if writer is None:
+            raise ValueError("当前环境缺少 H.264 编码器，不能生成浏览器预览")
+
+        frame_index = 0
+        next_output_index = 0.0
+        frame_step = source_fps / target_fps
+        written_frames = 0
+        while True:
+            ok, frame = capture.read()
+            if not ok:
+                break
+            if frame_index == 0 and not cv2.imwrite(str(poster_path), frame):
+                raise ValueError("无法生成视频首帧封面")
+            if frame_index + 1e-6 >= next_output_index:
+                preview_frame = (
+                    cv2.resize(
+                        frame,
+                        (preview_width, preview_height),
+                        interpolation=cv2.INTER_AREA,
+                    )
+                    if (preview_width, preview_height) != (width, height)
+                    else frame
+                )
+                writer.write(preview_frame)
+                written_frames += 1
+                next_output_index += frame_step
+            frame_index += 1
+        if written_frames < 1:
+            raise ValueError("上传视频没有可用于预览的画面")
+    except Exception:
+        capture.release()
+        if writer is not None:
+            writer.release()
+            writer = None
+        preview_path.unlink(missing_ok=True)
+        poster_path.unlink(missing_ok=True)
+        raise
+    finally:
+        capture.release()
+        if writer is not None:
+            writer.release()
+
+    if not preview_path.is_file() or preview_path.stat().st_size < 1:
+        poster_path.unlink(missing_ok=True)
+        raise ValueError("H.264 浏览器预览生成失败")
+
+    return {"preview_path": str(preview_path), "poster_path": str(poster_path)}
 
 
 def display_path(path: Path) -> str:
@@ -349,6 +449,30 @@ def get_agent_service() -> AgentService:
     return service
 
 
+def enrich_alarm_report_data(data: Any) -> None:
+    """Backfill rule-generated report text for chat messages saved before report rendering."""
+    if not isinstance(data, dict):
+        return
+    detection_id = str(data.get("detection_id") or "")
+    if detection_id and not data.get("alarm_report"):
+        record = agent_history_store.get_detection(detection_id)
+        if record is not None and record.alarm_report:
+            data["alarm_report"] = record.alarm_report
+    if detection_id and not data.get("event_frames"):
+        record = agent_history_store.get_detection(detection_id)
+        if record is not None and record.source_type == "video":
+            data["event_frames"] = AgentTools.video_event_frames(record.summary)
+        elif record is not None and record.source_type == "image":
+            data["event_frames"] = AgentTools.image_event_frames(
+                record.summary, str(data.get("visualization_image") or "")
+            )
+    steps = data.get("steps")
+    if isinstance(steps, list):
+        for step in steps:
+            if isinstance(step, dict):
+                enrich_alarm_report_data(step.get("data"))
+
+
 @app.get("/")
 def index():
     return render_template("web_index.html")
@@ -364,39 +488,58 @@ def api_agent_chat():
     try:
         message = request.form.get("message", "").strip()
         session_id = request.form.get("session_id", "default").strip() or "default"
-        if not message:
-            raise ValueError("聊天消息不能为空")
+        uploaded_media = (
+            request.files.get("media")
+            or request.files.get("image")
+            or request.files.get("video")
+        )
+        has_media = uploaded_media is not None and bool(uploaded_media.filename)
+        if not message and not has_media:
+            raise ValueError("请输入指令或发送需要分析的图片/视频")
         if len(message) > 4000:
             raise ValueError("聊天消息不能超过 4000 个字符")
         if len(session_id) > 128:
             raise ValueError("session_id 不能超过 128 个字符")
 
         context: Dict[str, Any] = {}
-        uploaded_media = (
-            request.files.get("media")
-            or request.files.get("image")
-            or request.files.get("video")
-        )
         with pipeline_lock:
-            if uploaded_media is not None and uploaded_media.filename:
+            media_type = ""
+            original_name = ""
+            if has_media:
+                original_name = Path(str(uploaded_media.filename)).name[:255]
                 suffix = Path(uploaded_media.filename).suffix.lower()
                 if suffix in ALLOWED_EXTENSIONS:
+                    media_type = "image"
                     context["image_path"] = str(
                         save_uploaded_image_file(uploaded_media, AGENT_IMAGE_UPLOAD_DIR)
                     )
                 else:
-                    context["video_path"] = str(save_uploaded_video(uploaded_media))
+                    media_type = "video"
+                    video_path = save_uploaded_video(uploaded_media)
+                    context["video_path"] = str(video_path)
+                    context["_attachment_preview"] = create_browser_video_assets(video_path)
             video_start_time = request.form.get("video_start_time", "").strip()
             if video_start_time:
                 context["video_start_time"] = video_start_time
             alarm_id = request.form.get("alarm_id", "").strip()
             if alarm_id:
                 context["alarm_id"] = alarm_id
+            if not message:
+                response = get_agent_service().receive_attachment(
+                    media_type,
+                    context[f"{media_type}_path"],
+                    session_id=session_id,
+                    original_name=original_name,
+                    context=context,
+                )
+                return jsonify(response)
             response = get_agent_service().chat(
                 message,
                 session_id=session_id,
                 context=context,
             )
+            if has_media:
+                response["attachment_received"] = True
         return jsonify(response)
     except (ValueError, FileNotFoundError) as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
@@ -414,6 +557,19 @@ def api_agent_history():
         if not 1 <= limit <= 200:
             raise ValueError("limit 必须在 1 到 200 之间")
         messages = get_agent_service().history(session_id, limit=limit)
+        for item in messages:
+            metadata = item.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            enrich_alarm_report_data(metadata.get("data"))
+            attachment = metadata.get("attachment")
+            if not isinstance(attachment, dict) or attachment.get("media_type") != "video":
+                continue
+            video_path = Path(str(attachment.get("path") or ""))
+            preview_path, poster_path = browser_video_asset_paths(video_path)
+            if preview_path.is_file() and poster_path.is_file():
+                attachment.setdefault("preview_path", str(preview_path))
+                attachment.setdefault("poster_path", str(poster_path))
         return jsonify({"ok": True, "session_id": session_id, "messages": messages})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

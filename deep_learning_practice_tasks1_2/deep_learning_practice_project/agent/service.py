@@ -25,6 +25,8 @@ HELP_TEXT = (
     "生成今日风险报告、确认报警、取消报警。还可通过 Skill 接口执行风险研判、"
     "按时间/风险/线路查询、人工复核和组合巡检任务。"
 )
+MISSING_MEDIA_REPLY = "还没有看到图片/视频，发过来立刻帮你分析。"
+ATTACHMENT_LABELS = {"image": "图片", "video": "视频"}
 
 PLANNING_HINT = re.compile(
     r"(?:\d{1,2}[：:]\d{2}.*(?:-|到|至).*\d{1,2}[：:]\d{2}|"
@@ -135,6 +137,104 @@ class AgentService:
     def skill_catalog(self) -> list[Dict[str, Any]]:
         return self.skill_registry.catalog()
 
+    @staticmethod
+    def _attachment_metadata(context: Mapping[str, Any]) -> Dict[str, Any]:
+        for media_type, path_key in (("image", "image_path"), ("video", "video_path")):
+            raw_path = context.get(path_key)
+            if not raw_path:
+                continue
+            path = str(raw_path)
+            attachment = {
+                "media_type": media_type,
+                "path": path,
+                "file_name": Path(path).name,
+            }
+            for name in ("video_start_time", "line_id"):
+                if context.get(name) not in (None, ""):
+                    attachment[name] = context[name]
+            preview = context.get("_attachment_preview")
+            if isinstance(preview, Mapping):
+                for name in ("preview_path", "poster_path"):
+                    if preview.get(name) not in (None, ""):
+                        attachment[name] = str(preview[name])
+            return attachment
+        return {}
+
+    def _latest_attachment_context(self, session_id: str) -> Dict[str, Any]:
+        for item in reversed(self.store.list_messages(session_id, limit=50)):
+            metadata = item.get("metadata")
+            if not isinstance(metadata, Mapping):
+                continue
+            attachment = metadata.get("attachment")
+            if not isinstance(attachment, Mapping):
+                continue
+            media_type = str(attachment.get("media_type") or "")
+            path = str(attachment.get("path") or "")
+            if media_type not in ATTACHMENT_LABELS or not path or not Path(path).is_file():
+                continue
+            context: Dict[str, Any] = {f"{media_type}_path": path}
+            for name in ("video_start_time", "line_id"):
+                if attachment.get(name) not in (None, ""):
+                    context[name] = attachment[name]
+            return context
+        return {}
+
+    def receive_attachment(
+        self,
+        media_type: str,
+        media_path: str | Path,
+        *,
+        session_id: str = "default",
+        original_name: str = "",
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Persist an uploaded attachment so a later chat turn can use it."""
+        normalized_type = media_type.strip().lower()
+        if normalized_type not in ATTACHMENT_LABELS:
+            raise ValueError("media_type 只能是 image 或 video")
+        path_key = f"{normalized_type}_path"
+        attachment_context = dict(context or {})
+        attachment_context[path_key] = str(media_path)
+        attachment = self._attachment_metadata(attachment_context)
+        if original_name.strip():
+            attachment["file_name"] = original_name.strip()
+
+        label = ATTACHMENT_LABELS[normalized_type]
+        file_name = str(attachment.get("file_name") or Path(media_path).name)
+        user_content = f"已发送{label}"
+        reply = f"我已接收到{label}，请给我下一步指令。"
+        data = {"media_type": normalized_type, "file_name": file_name}
+        for name in ("preview_path", "poster_path"):
+            if attachment.get(name):
+                data[name] = attachment[name]
+        self.store.record_message(
+            session_id,
+            "user",
+            user_content,
+            intent="attachment_received",
+            metadata={"attachment": attachment},
+        )
+        self.store.record_message(
+            session_id,
+            "assistant",
+            reply,
+            intent="attachment_received",
+            metadata={"ok": True, "attachment_received": True, "data": data},
+        )
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "intent": "attachment_received",
+            "confidence": 1.0,
+            "recognizer_source": "attachment_handler",
+            "recognition_metadata": {},
+            "tool_name": "",
+            "reply": reply,
+            "data": data,
+            "attachment": attachment,
+            "attachment_received": True,
+        }
+
     def _run_skill_plan(
         self,
         message: str,
@@ -200,6 +300,11 @@ class AgentService:
         )
         replies = [str(item.get("reply") or "") for item in step_results]
         reply = "\n".join(text for text in replies if text)
+        requires_attachment = any(
+            bool(item.get("requires_attachment")) for item in step_results
+        )
+        if requires_attachment:
+            reply = MISSING_MEDIA_REPLY
         if not reply:
             reply = plan.summary or ("任务执行完成。" if ok else "任务执行未完成。")
         return {
@@ -211,6 +316,7 @@ class AgentService:
             "recognition_metadata": {"plan": plan.to_dict()},
             "tool_name": "skill_orchestrator",
             "reply": reply,
+            "requires_attachment": requires_attachment,
             "data": {
                 "plan": plan.to_dict(),
                 "steps": step_results,
@@ -282,11 +388,25 @@ class AgentService:
         message = message.strip()
         if not message:
             raise ValueError("聊天消息不能为空")
-        self.store.record_message(session_id, "user", message)
+        raw_context = dict(context or {})
+        incoming_attachment = self._attachment_metadata(raw_context)
+        incoming_context = {
+            name: value
+            for name, value in raw_context.items()
+            if name != "_attachment_preview"
+        }
+        stored_attachment_context = (
+            {} if incoming_attachment else self._latest_attachment_context(session_id)
+        )
+        planning_request_context = {**stored_attachment_context, **incoming_context}
+        user_metadata = (
+            {"attachment": incoming_attachment} if incoming_attachment else None
+        )
+        self.store.record_message(session_id, "user", message, metadata=user_metadata)
         recognition_context = {
             "session_id": session_id,
             "history": self.store.list_messages(session_id, limit=12),
-            "request_context": dict(context or {}),
+            "request_context": planning_request_context,
         }
         match = self.recognizer.recognize(message, context=recognition_context)
 
@@ -295,12 +415,19 @@ class AgentService:
             or match.intent == Intent.UNKNOWN
             or bool(PLANNING_HINT.search(message))
         )
+        should_use_stored_attachment = use_skill_planner or match.intent in {
+            Intent.DETECT_IMAGE,
+            Intent.DETECT_VIDEO,
+        }
+        resolved_context = dict(incoming_context)
+        if should_use_stored_attachment and not incoming_attachment:
+            resolved_context = {**stored_attachment_context, **incoming_context}
         if use_skill_planner:
             try:
                 response = self._run_skill_plan(
                     message,
                     session_id=session_id,
-                    context=dict(context or {}),
+                    context=resolved_context,
                     planning_context=recognition_context,
                 )
             except SkillPlanningError as exc:
@@ -329,7 +456,12 @@ class AgentService:
                 "data": {},
             }
         else:
-            routed = self.router.dispatch(match, session_id, context)
+            routed = self.router.dispatch(match, session_id, resolved_context)
+            if routed.get("requires_attachment") and match.intent in {
+                Intent.DETECT_IMAGE,
+                Intent.DETECT_VIDEO,
+            }:
+                routed["reply"] = MISSING_MEDIA_REPLY
             response = {
                 "session_id": session_id,
                 "intent": match.intent.value,
@@ -338,6 +470,10 @@ class AgentService:
                 "recognition_metadata": match.metadata,
                 **routed,
             }
+
+        if incoming_attachment:
+            response["attachment_received"] = True
+            response["attachment"] = incoming_attachment
 
         self.store.record_message(
             session_id,

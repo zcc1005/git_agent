@@ -29,7 +29,10 @@ def fake_detection_runner(
         "status": "completed",
         "video": str(video_path),
         "num_events": 2,
-        "events": [{"event_id": 1}, {"event_id": 2}],
+        "events": [
+            {"event_id": 1, "key_frame": "outputs/frames/event_1.jpg"},
+            {"event_id": 2, "key_frame": "outputs/frames/event_2.jpg"},
+        ],
         "class_counts": {"metal": 1, "stone": 1},
     }
     alarm = {
@@ -57,7 +60,12 @@ def fake_image_detection_runner(
         "report_id": "alarm-image-test-001",
         "overall_risk": {"level": "high", "requires_stop": True},
     }
-    return ImageDetectionOutcome(detection, alarm, "测试图片报警报告")
+    return ImageDetectionOutcome(
+        detection,
+        alarm,
+        "测试图片报警报告",
+        visualization_image="outputs/frames/image_event_1.jpg",
+    )
 
 
 class StaticModelRecognizer:
@@ -171,8 +179,16 @@ class AgentServiceTests(unittest.TestCase):
         report = self.service.chat("生成今日风险报告", session_id="s1")
 
         self.assertTrue(detected["ok"])
+        self.assertNotIn("报警编号", detected["reply"])
         self.assertEqual(detected["data"]["event_count"], 2)
+        self.assertEqual(detected["data"]["alarm_report"], "测试报警报告")
+        self.assertEqual(
+            detected["data"]["event_frames"][0]["key_frame"],
+            "outputs/frames/event_1.jpg",
+        )
         self.assertTrue(previous["data"]["found"])
+        self.assertEqual(previous["data"]["alarm_report"], "测试报警报告")
+        self.assertEqual(len(previous["data"]["event_frames"]), 2)
         self.assertEqual(previous["data"]["risk_level"], "high")
         self.assertEqual(count["data"]["high_risk_count"], 1)
         self.assertEqual(report["data"]["detection_count"], 1)
@@ -182,6 +198,32 @@ class AgentServiceTests(unittest.TestCase):
         response = self.service.chat("检测这段视频", session_id="s1")
         self.assertFalse(response["ok"])
         self.assertTrue(response["requires_attachment"])
+        self.assertEqual(response["reply"], "还没有看到图片/视频，发过来立刻帮你分析。")
+
+    def test_attachment_only_turn_is_reused_by_next_instruction(self) -> None:
+        received = self.service.receive_attachment(
+            "video",
+            self.video,
+            session_id="pending-video",
+            original_name="上午巡检.mp4",
+            context={
+                "_attachment_preview": {
+                    "preview_path": "outputs/previews/browser.mp4",
+                    "poster_path": "outputs/previews/poster.jpg",
+                }
+            },
+        )
+        detected = self.service.chat("检测这段视频", session_id="pending-video")
+        history = self.service.history("pending-video")
+
+        self.assertEqual(received["reply"], "我已接收到视频，请给我下一步指令。")
+        self.assertTrue(detected["ok"])
+        self.assertEqual(detected["data"]["event_count"], 2)
+        self.assertEqual(history[0]["content"], "已发送视频")
+        self.assertEqual(history[0]["metadata"]["attachment"]["path"], str(self.video))
+        self.assertEqual(
+            received["attachment"]["preview_path"], "outputs/previews/browser.mp4"
+        )
 
     def test_image_detection_is_routed_and_persisted(self) -> None:
         detected = self.service.chat(
@@ -192,9 +234,15 @@ class AgentServiceTests(unittest.TestCase):
         previous = self.service.chat("查询上一轮结果", session_id="image-session")
 
         self.assertTrue(detected["ok"])
+        self.assertNotIn("报警编号", detected["reply"])
         self.assertEqual(detected["intent"], "detect_image")
         self.assertEqual(detected["data"]["detection_count"], 2)
         self.assertEqual(detected["data"]["candidate_count"], 1)
+        self.assertEqual(detected["data"]["alarm_report"], "测试图片报警报告")
+        self.assertEqual(
+            detected["data"]["event_frames"],
+            [{"event_id": 1, "key_frame": "outputs/frames/image_event_1.jpg"}],
+        )
         self.assertEqual(previous["data"]["source_type"], "image")
         self.assertEqual(previous["data"]["detection_count"], 2)
 
@@ -202,6 +250,7 @@ class AgentServiceTests(unittest.TestCase):
         response = self.service.chat("检测这张图片", session_id="image-session")
         self.assertFalse(response["ok"])
         self.assertTrue(response["requires_attachment"])
+        self.assertEqual(response["reply"], "还没有看到图片/视频，发过来立刻帮你分析。")
 
     def test_alarm_can_be_confirmed_then_cancelled_and_is_audited(self) -> None:
         self.service.chat(

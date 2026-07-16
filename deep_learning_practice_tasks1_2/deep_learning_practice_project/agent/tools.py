@@ -96,13 +96,42 @@ class AgentTools:
         self._alarm_control_handler = alarm_control_handler
         self._now = now or (lambda: datetime.now().astimezone())
 
+    @staticmethod
+    def video_event_frames(detection: Dict[str, Any]) -> list[Dict[str, Any]]:
+        frames: list[Dict[str, Any]] = []
+        for index, event in enumerate(detection.get("events") or [], start=1):
+            if not isinstance(event, dict):
+                continue
+            key_frame = str(event.get("key_frame") or "")
+            if not key_frame:
+                continue
+            frames.append(
+                {
+                    "event_id": _integer(event.get("event_id"), index),
+                    "key_frame": key_frame,
+                }
+            )
+        return frames
+
+    @staticmethod
+    def image_event_frames(
+        detection: Dict[str, Any], visualization_image: str = ""
+    ) -> list[Dict[str, Any]]:
+        key_frame = str(visualization_image or "")
+        if not key_frame:
+            visualization_dir = str(detection.get("visualization_dir") or "")
+            source = str(detection.get("source") or "")
+            if visualization_dir and source:
+                key_frame = str(Path(visualization_dir) / Path(source).name)
+        return [{"event_id": 1, "key_frame": key_frame}] if key_frame else []
+
     def detect_image(self, session_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
         raw_path = context.get("image_path")
         if not raw_path:
             return {
                 "ok": False,
                 "requires_attachment": True,
-                "reply": "请先上传或选择要检测的图片，然后再发送“检测这张图片”。",
+                "reply": "还没有看到图片/视频，发过来立刻帮你分析。",
                 "data": {},
             }
 
@@ -141,7 +170,6 @@ class AgentTools:
             "reply": (
                 f"图片检测完成：确认 {detection_count} 个异物，"
                 f"保留 {candidate_count} 个待确认候选，总体为{risk_name}。"
-                f"报警编号 {alarm_record.id}。"
             ),
             "data": {
                 "detection_id": detection_record.id,
@@ -155,8 +183,12 @@ class AgentTools:
                 "result_json": outcome.result_json,
                 "alarm_json": outcome.alarm_json,
                 "alarm_report_path": outcome.alarm_report_path,
+                "alarm_report": outcome.alarm_report,
                 "visualization_dir": outcome.visualization_dir,
                 "visualization_image": outcome.visualization_image,
+                "event_frames": self.image_event_frames(
+                    outcome.detection, outcome.visualization_image
+                ),
             },
         }
 
@@ -166,7 +198,7 @@ class AgentTools:
             return {
                 "ok": False,
                 "requires_attachment": True,
-                "reply": "请先上传或选择要检测的视频，然后再发送“检测这段视频”。",
+                "reply": "还没有看到图片/视频，发过来立刻帮你分析。",
                 "data": {},
             }
 
@@ -221,7 +253,7 @@ class AgentTools:
             "requires_attachment": False,
             "reply": (
                 f"视频检测完成：发现 {event_count} 个异物事件，"
-                f"总体为{risk_name}。报警编号 {alarm_record.id}。"
+                f"总体为{risk_name}。"
             ),
             "data": {
                 "detection_id": detection_record.id,
@@ -236,6 +268,8 @@ class AgentTools:
                 "result_json": outcome.result_json,
                 "alarm_json": outcome.alarm_json,
                 "alarm_report_path": outcome.alarm_report_path,
+                "alarm_report": outcome.alarm_report,
+                "event_frames": self.video_event_frames(outcome.detection),
             },
         }
 
@@ -270,6 +304,12 @@ class AgentTools:
                 "detection_count": detection_count,
                 "class_counts": record.summary.get("class_counts") or {},
                 "created_at": record.created_at,
+                "alarm_report": record.alarm_report,
+                "event_frames": (
+                    self.video_event_frames(record.summary)
+                    if record.source_type == "video"
+                    else self.image_event_frames(record.summary)
+                ),
             },
         }
 
