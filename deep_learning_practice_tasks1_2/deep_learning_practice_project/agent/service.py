@@ -13,12 +13,14 @@ from .recognizers import (
     RecognitionMode,
 )
 from .router import ToolRouter
+from .skills import SkillRegistry, create_builtin_skill_registry
 from .tools import AgentTools
 
 
 HELP_TEXT = (
     "我支持：检测这张图片、检测这段视频、查询上一轮结果、统计今天高风险报警次数、"
-    "生成今日风险报告、确认报警、取消报警。"
+    "生成今日风险报告、确认报警、取消报警。还可通过 Skill 接口执行风险研判、"
+    "按时间/风险/线路查询、人工复核和组合巡检任务。"
 )
 
 
@@ -34,6 +36,7 @@ class AgentService:
         model_recognizer: Optional[IntentRecognizer] = None,
         recognition_mode: RecognitionMode | str = RecognitionMode.HYBRID,
         model_confidence_threshold: float = 0.75,
+        skill_registry: Optional[SkillRegistry] = None,
     ) -> None:
         if recognizer is not None and model_recognizer is not None:
             raise ValueError("recognizer 与 model_recognizer 不能同时提供")
@@ -43,14 +46,23 @@ class AgentService:
             else SQLiteHistoryStore(OUTPUTS_DIR / "agent_history.sqlite3")
         )
         self.tools = tools or AgentTools(self.store)
+        self.skill_registry = skill_registry or create_builtin_skill_registry(self.tools)
         self.recognizer = recognizer or HybridIntentRecognizer(
             model_recognizer=model_recognizer,
             mode=recognition_mode,
             model_confidence_threshold=model_confidence_threshold,
         )
         self.router = ToolRouter()
-        self.router.register(Intent.DETECT_IMAGE, "image_detection", self.tools.detect_image)
-        self.router.register(Intent.DETECT_VIDEO, "video_detection", self.tools.detect_video)
+        self.router.register(
+            Intent.DETECT_IMAGE,
+            "image_detection",
+            self._skill_handler("detect-image"),
+        )
+        self.router.register(
+            Intent.DETECT_VIDEO,
+            "video_detection",
+            self._skill_handler("detect-video"),
+        )
         self.router.register(Intent.PREVIOUS_RESULT, "history_query", self.tools.previous_result)
         self.router.register(
             Intent.COUNT_HIGH_RISK_TODAY,
@@ -62,8 +74,49 @@ class AgentService:
             "daily_risk_report",
             self.tools.generate_daily_report,
         )
-        self.router.register(Intent.CONFIRM_ALARM, "alarm_control", self.tools.confirm_alarm)
-        self.router.register(Intent.CANCEL_ALARM, "alarm_control", self.tools.cancel_alarm)
+        self.router.register(
+            Intent.CURRENT_ALARM,
+            "alarm_control",
+            self._skill_handler("control-alarm", action="query"),
+        )
+        self.router.register(
+            Intent.CONFIRM_ALARM,
+            "alarm_control",
+            self._skill_handler("control-alarm", action="confirm"),
+        )
+        self.router.register(
+            Intent.CANCEL_ALARM,
+            "alarm_control",
+            self._skill_handler("control-alarm", action="cancel"),
+        )
+
+    def _skill_handler(self, skill_name: str, **defaults: Any):
+        def handler(session_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+            arguments = {**defaults, **context}
+            return self.skill_registry.invoke(
+                skill_name,
+                session_id=session_id,
+                arguments=arguments,
+            ).to_dict()
+
+        return handler
+
+    def run_skill(
+        self,
+        skill_name: str,
+        *,
+        session_id: str = "default",
+        arguments: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Stable deterministic entry point for a future LLM planner or Web API."""
+        return self.skill_registry.invoke(
+            skill_name,
+            session_id=session_id,
+            arguments=arguments or {},
+        ).to_dict()
+
+    def skill_catalog(self) -> list[Dict[str, Any]]:
+        return self.skill_registry.catalog()
 
     def chat(
         self,

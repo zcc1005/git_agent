@@ -8,6 +8,7 @@ from .recognizers import (
     RecognitionMode,
 )
 from .service import AgentService
+from .skills import RuntimeSkill, SkillRegistry, SkillResult, SkillSpec
 from .tools import AgentTools, ImageDetectionOutcome, VideoDetectionOutcome
 
 __all__ = [
@@ -22,4 +23,8 @@ __all__ = [
     "ImageDetectionOutcome",
     "VideoDetectionOutcome",
     "existing_web_alarm_control",
+    "RuntimeSkill",
+    "SkillRegistry",
+    "SkillResult",
+    "SkillSpec",
 ]

@@ -52,6 +52,48 @@ agent_service = AgentService(
 
 模型只能提出 `Intent + confidence + slots`，不能返回或执行任意函数名。最终仍由 `ToolRouter` 将封闭意图映射到现有业务工具。模型推断出的 `confirm_alarm` / `cancel_alarm` 如果没有同时命中显式规则，会返回 `unknown`，不会执行报警控制。
 
+### 0.1 Skill 规划接口
+
+复杂自然语言任务后续应由大模型生成“封闭 Skill 名称 + 参数”，再调用稳定入口，不让模型执行任意 Python 函数：
+
+```python
+catalog = agent_service.skill_catalog()
+result = agent_service.run_skill(
+    "detect-video",
+    session_id="operator-1",
+    arguments={
+        "video_path": "data/line-1-0800.mp4",
+        "video_start_time": "2026-07-16T08:00:00+08:00",
+        "line_id": "line-1",
+        "parameters": {"sample_fps": 4.0, "roi": [100, 80, 1180, 700]},
+    },
+)
+```
+
+当前注册表只允许以下 Skill：
+
+- `detect-image`
+- `detect-video`
+- `parse-detection-result`
+- `assess-risk`
+- `control-alarm`
+- `query-history`
+- `generate-risk-report`
+- `review-detection`
+- `run-inspection-task`
+
+其中检测、风险研判、报警控制和人工复核仍由确定性代码执行。大模型只负责理解任务、抽取参数、选择 Skill 和组织结果。
+
+### 0.2 待数据结构稳定后增加的 Web 接口
+
+本次不修改 `web_app.py`，仅记录后续建议接口：
+
+- `GET /api/agent/skills`：返回 `AgentService.skill_catalog()`。
+- `POST /api/agent/skills/<skill_name>/invoke`：校验 JSON 参数后调用 `AgentService.run_skill()`。
+- 长视频检测改为异步任务时，再补 `POST /api/agent/jobs` 与 `GET /api/agent/jobs/<job_id>`。
+
+报警确认、取消和检测复核接口必须保留显式动作校验、操作者身份、备注与审计记录。
+
 ## 1. `POST /api/agent/chat`
 
 请求使用 `multipart/form-data`：

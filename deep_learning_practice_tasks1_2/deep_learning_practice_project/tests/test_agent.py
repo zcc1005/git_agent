@@ -81,6 +81,7 @@ class IntentRecognizerTests(unittest.TestCase):
             "查询上一轮结果": Intent.PREVIOUS_RESULT,
             "今天有几次高风险报警": Intent.COUNT_HIGH_RISK_TODAY,
             "生成今日风险报告": Intent.GENERATE_DAILY_REPORT,
+            "查看当前报警": Intent.CURRENT_ALARM,
             "确认报警": Intent.CONFIRM_ALARM,
             "取消报警": Intent.CANCEL_ALARM,
         }

@@ -12,6 +12,7 @@ class Intent(str, Enum):
     PREVIOUS_RESULT = "previous_result"
     COUNT_HIGH_RISK_TODAY = "count_high_risk_today"
     GENERATE_DAILY_REPORT = "generate_daily_report"
+    CURRENT_ALARM = "current_alarm"
     CONFIRM_ALARM = "confirm_alarm"
     CANCEL_ALARM = "cancel_alarm"
     HELP = "help"
@@ -48,6 +49,14 @@ class RuleBasedIntentRecognizer:
             (
                 re.compile(r"(?<!已)(?:确认|继续|保留)(?:这次|当前|本次|上次|上一轮)?报警"),
                 re.compile(r"confirm\s+(?:the\s+)?alarm", re.I),
+            ),
+        ),
+        (
+            Intent.CURRENT_ALARM,
+            (
+                re.compile(r"(?:查询|查看|看看|显示)(?:当前|现在)(?:的)?(?:报警|告警)(?:状态|详情|信息)?"),
+                re.compile(r"(?:当前|现在)(?:的)?(?:报警|告警)(?:是什么|状态|详情|信息)"),
+                re.compile(r"(?:current|latest)\s+alarm", re.I),
             ),
         ),
         (

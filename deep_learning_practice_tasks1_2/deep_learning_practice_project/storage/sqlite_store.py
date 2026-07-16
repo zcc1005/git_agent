@@ -12,6 +12,8 @@ from typing import Any, Callable, Dict, Iterator, List, Optional
 
 VALID_ALARM_STATUSES = {"inactive", "pending", "confirmed", "cancelled"}
 VALID_ALARM_ACTIONS = {"confirm", "cancel"}
+VALID_REVIEW_STATUSES = {"unreviewed", "confirmed", "rejected", "closed"}
+VALID_REVIEW_ACTIONS = {"confirm", "reject", "close", "reopen"}
 
 
 def _json_dump(value: Any) -> str:
@@ -32,6 +34,13 @@ class DetectionRecord:
     risk_level: str
     summary: Dict[str, Any]
     alarm_report: str
+    line_id: str
+    source_started_at: str
+    source_ended_at: str
+    review_status: str
+    review_note: str
+    reviewer: str
+    reviewed_at: str
     created_at: str
 
 
@@ -144,6 +153,19 @@ class SQLiteHistoryStore:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS detection_review_actions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    detection_id TEXT NOT NULL
+                        REFERENCES detection_runs(id) ON DELETE CASCADE,
+                    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    action TEXT NOT NULL CHECK (
+                        action IN ('confirm', 'reject', 'close', 'reopen')
+                    ),
+                    reviewer TEXT NOT NULL DEFAULT '',
+                    note TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_messages_session_created
                     ON messages(session_id, created_at, id);
                 CREATE INDEX IF NOT EXISTS idx_detection_session_created
@@ -154,6 +176,54 @@ class SQLiteHistoryStore:
                     ON alarms(risk_level, created_at);
                 """
             )
+            self._ensure_column(connection, "detection_runs", "line_id", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(
+                connection, "detection_runs", "source_started_at", "TEXT NOT NULL DEFAULT ''"
+            )
+            self._ensure_column(
+                connection, "detection_runs", "source_ended_at", "TEXT NOT NULL DEFAULT ''"
+            )
+            self._ensure_column(
+                connection,
+                "detection_runs",
+                "review_status",
+                "TEXT NOT NULL DEFAULT 'unreviewed'",
+            )
+            self._ensure_column(
+                connection, "detection_runs", "review_note", "TEXT NOT NULL DEFAULT ''"
+            )
+            self._ensure_column(
+                connection, "detection_runs", "reviewer", "TEXT NOT NULL DEFAULT ''"
+            )
+            self._ensure_column(
+                connection, "detection_runs", "reviewed_at", "TEXT NOT NULL DEFAULT ''"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_detection_line_created "
+                "ON detection_runs(line_id, created_at DESC)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_detection_source_time "
+                "ON detection_runs(source_started_at, source_ended_at)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_detection_review_status "
+                "ON detection_runs(review_status, created_at DESC)"
+            )
+
+    @staticmethod
+    def _ensure_column(
+        connection: sqlite3.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def ensure_session(self, session_id: str) -> None:
         session_id = session_id.strip()
@@ -239,6 +309,9 @@ class SQLiteHistoryStore:
         detection: Dict[str, Any],
         alarm_document: Dict[str, Any],
         alarm_report: str,
+        line_id: str = "",
+        source_started_at: str = "",
+        source_ended_at: str = "",
     ) -> tuple[DetectionRecord, AlarmRecord]:
         self.ensure_session(session_id)
         timestamp = self._timestamp()
@@ -254,8 +327,9 @@ class SQLiteHistoryStore:
                 """
                 INSERT INTO detection_runs(
                     id, session_id, source_type, source_path, status,
-                    risk_level, summary_json, alarm_report, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    risk_level, summary_json, alarm_report, line_id,
+                    source_started_at, source_ended_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     detection_id,
@@ -266,6 +340,9 @@ class SQLiteHistoryStore:
                     risk_level,
                     _json_dump(detection),
                     alarm_report,
+                    str(line_id or "").strip(),
+                    str(source_started_at or "").strip(),
+                    str(source_ended_at or "").strip(),
                     timestamp,
                 ),
             )
@@ -299,6 +376,13 @@ class SQLiteHistoryStore:
             risk_level=risk_level,
             summary=detection,
             alarm_report=alarm_report,
+            line_id=str(line_id or "").strip(),
+            source_started_at=str(source_started_at or "").strip(),
+            source_ended_at=str(source_ended_at or "").strip(),
+            review_status="unreviewed",
+            review_note="",
+            reviewer="",
+            reviewed_at="",
             created_at=timestamp,
         )
         alarm_record = AlarmRecord(
@@ -326,6 +410,13 @@ class SQLiteHistoryStore:
             risk_level=row["risk_level"],
             summary=_json_load(row["summary_json"]),
             alarm_report=row["alarm_report"],
+            line_id=row["line_id"],
+            source_started_at=row["source_started_at"],
+            source_ended_at=row["source_ended_at"],
+            review_status=row["review_status"],
+            review_note=row["review_note"],
+            reviewer=row["reviewer"],
+            reviewed_at=row["reviewed_at"],
             created_at=row["created_at"],
         )
 
@@ -355,11 +446,161 @@ class SQLiteHistoryStore:
             row = connection.execute(query, parameters).fetchone()
         return self._detection_from_row(row) if row else None
 
+    def get_detection(self, detection_id: str) -> Optional[DetectionRecord]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM detection_runs WHERE id = ?", (detection_id,)
+            ).fetchone()
+        return self._detection_from_row(row) if row else None
+
+    def query_detections(
+        self,
+        *,
+        start_time: str = "",
+        end_time: str = "",
+        risk_level: str = "",
+        line_id: str = "",
+        source_type: str = "",
+        review_status: str = "",
+        limit: int = 100,
+    ) -> List[DetectionRecord]:
+        if limit < 1:
+            return []
+        query = "SELECT * FROM detection_runs WHERE 1 = 1"
+        parameters: List[Any] = []
+        if start_time:
+            query += (
+                " AND julianday(COALESCE(NULLIF(source_ended_at, ''), "
+                "NULLIF(source_started_at, ''), created_at)) >= julianday(?)"
+            )
+            parameters.append(start_time)
+        if end_time:
+            query += (
+                " AND julianday(COALESCE(NULLIF(source_started_at, ''), created_at)) "
+                "<= julianday(?)"
+            )
+            parameters.append(end_time)
+        for column, value in (
+            ("risk_level", risk_level.lower()),
+            ("line_id", line_id),
+            ("source_type", source_type.lower()),
+            ("review_status", review_status.lower()),
+        ):
+            if value:
+                query += f" AND {column} = ?"
+                parameters.append(value)
+        query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+        parameters.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(parameters)).fetchall()
+        return [self._detection_from_row(row) for row in rows]
+
+    def set_detection_review(
+        self,
+        detection_id: str,
+        session_id: str,
+        action: str,
+        *,
+        reviewer: str = "",
+        note: str = "",
+    ) -> DetectionRecord:
+        action = action.lower().strip()
+        if action not in VALID_REVIEW_ACTIONS:
+            raise ValueError(f"不支持的复核动作：{action}")
+        self.ensure_session(session_id)
+        timestamp = self._timestamp()
+        status_by_action = {
+            "confirm": "confirmed",
+            "reject": "rejected",
+            "close": "closed",
+            "reopen": "unreviewed",
+        }
+        new_status = status_by_action[action]
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id FROM detection_runs WHERE id = ?", (detection_id,)
+            ).fetchone()
+            if row is None:
+                raise LookupError(f"找不到检测记录：{detection_id}")
+            connection.execute(
+                """
+                UPDATE detection_runs
+                SET review_status = ?, review_note = ?, reviewer = ?, reviewed_at = ?
+                WHERE id = ?
+                """,
+                (new_status, note.strip(), reviewer.strip(), timestamp, detection_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO detection_review_actions(
+                    detection_id, session_id, action, reviewer, note, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    detection_id,
+                    session_id,
+                    action,
+                    reviewer.strip(),
+                    note.strip(),
+                    timestamp,
+                ),
+            )
+            updated = connection.execute(
+                "SELECT * FROM detection_runs WHERE id = ?", (detection_id,)
+            ).fetchone()
+        return self._detection_from_row(updated)
+
+    def list_detection_review_actions(self, detection_id: str) -> List[Dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT session_id, action, reviewer, note, created_at
+                FROM detection_review_actions
+                WHERE detection_id = ?
+                ORDER BY id ASC
+                """,
+                (detection_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_alarm(self, alarm_id: str) -> Optional[AlarmRecord]:
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT * FROM alarms WHERE id = ?", (alarm_id,)
             ).fetchone()
+        return self._alarm_from_row(row) if row else None
+
+    def get_alarm_for_detection(self, detection_id: str) -> Optional[AlarmRecord]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM alarms WHERE detection_id = ?", (detection_id,)
+            ).fetchone()
+        return self._alarm_from_row(row) if row else None
+
+    def current_alarm(
+        self,
+        session_id: Optional[str] = None,
+        *,
+        line_id: str = "",
+    ) -> Optional[AlarmRecord]:
+        query = (
+            "SELECT a.* FROM alarms a "
+            "JOIN detection_runs d ON d.id = a.detection_id "
+            "WHERE a.status != 'inactive'"
+        )
+        parameters: List[Any] = []
+        if session_id:
+            query += " AND a.session_id = ?"
+            parameters.append(session_id)
+        if line_id:
+            query += " AND d.line_id = ?"
+            parameters.append(line_id)
+        query += (
+            " ORDER BY CASE WHEN a.status = 'pending' THEN 0 ELSE 1 END, "
+            "a.created_at DESC, a.rowid DESC LIMIT 1"
+        )
+        with self._connect() as connection:
+            row = connection.execute(query, tuple(parameters)).fetchone()
         return self._alarm_from_row(row) if row else None
 
     def latest_actionable_alarm(self, session_id: Optional[str] = None) -> Optional[AlarmRecord]:
@@ -457,4 +698,74 @@ class SQLiteHistoryStore:
             "alarm_count": sum(count for level, count in risk_counts.items() if level != "none"),
             "risk_counts": risk_counts,
             "status_counts": status_counts,
+        }
+
+    def filtered_summary(
+        self,
+        *,
+        start_time: str = "",
+        end_time: str = "",
+        risk_level: str = "",
+        line_id: str = "",
+        source_type: str = "",
+        review_status: str = "",
+        limit: int = 10000,
+    ) -> Dict[str, Any]:
+        records = self.query_detections(
+            start_time=start_time,
+            end_time=end_time,
+            risk_level=risk_level,
+            line_id=line_id,
+            source_type=source_type,
+            review_status=review_status,
+            limit=limit,
+        )
+        risk_counts = {level: 0 for level in ("none", "low", "medium", "high")}
+        source_counts: Dict[str, int] = {}
+        review_counts = {status: 0 for status in VALID_REVIEW_STATUSES}
+        class_counts: Dict[str, int] = {}
+        alarm_status_counts = {status: 0 for status in VALID_ALARM_STATUSES}
+        alarm_status_by_detection: Dict[str, str] = {}
+        detection_ids = [record.id for record in records]
+        with self._connect() as connection:
+            for offset in range(0, len(detection_ids), 900):
+                chunk = detection_ids[offset : offset + 900]
+                if not chunk:
+                    continue
+                placeholders = ",".join("?" for _ in chunk)
+                rows = connection.execute(
+                    f"SELECT detection_id, status FROM alarms "
+                    f"WHERE detection_id IN ({placeholders})",
+                    tuple(chunk),
+                ).fetchall()
+                alarm_status_by_detection.update(
+                    {str(row["detection_id"]): str(row["status"]) for row in rows}
+                )
+        for record in records:
+            risk_counts[record.risk_level] = risk_counts.get(record.risk_level, 0) + 1
+            source_counts[record.source_type] = source_counts.get(record.source_type, 0) + 1
+            review_counts[record.review_status] = review_counts.get(record.review_status, 0) + 1
+            for class_name, count in (record.summary.get("class_counts") or {}).items():
+                class_counts[str(class_name)] = class_counts.get(str(class_name), 0) + int(count)
+            alarm_status = alarm_status_by_detection.get(record.id)
+            if alarm_status:
+                alarm_status_counts[alarm_status] = (
+                    alarm_status_counts.get(alarm_status, 0) + 1
+                )
+        return {
+            "start_time": start_time,
+            "end_time": end_time,
+            "line_id": line_id,
+            "risk_level": risk_level,
+            "source_type": source_type,
+            "review_status": review_status,
+            "detection_count": len(records),
+            "alarm_count": sum(
+                count for level, count in risk_counts.items() if level != "none"
+            ),
+            "risk_counts": risk_counts,
+            "source_counts": source_counts,
+            "review_counts": review_counts,
+            "alarm_status_counts": alarm_status_counts,
+            "class_counts": class_counts,
         }

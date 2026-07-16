@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -48,6 +48,25 @@ RISK_NAMES = {
 def _integer(value: Any, default: int = 0) -> int:
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_datetime_text(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        parsed = datetime.fromisoformat(str(value).strip())
+    if parsed.tzinfo is None:
+        parsed = parsed.astimezone()
+    return parsed.isoformat(timespec="seconds")
+
+
+def _float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return default
 
@@ -105,6 +124,13 @@ class AgentTools:
             detection=outcome.detection,
             alarm_document=outcome.alarm_document,
             alarm_report=outcome.alarm_report,
+            line_id=str(context.get("line_id") or ""),
+            source_started_at=_normalize_datetime_text(
+                context.get("source_started_at") or context.get("captured_at")
+            ),
+            source_ended_at=_normalize_datetime_text(
+                context.get("source_ended_at") or context.get("captured_at")
+            ),
         )
         detection_count = _integer(outcome.detection.get("num_detections"))
         candidate_count = _integer(outcome.detection.get("num_candidates"))
@@ -163,6 +189,17 @@ class AgentTools:
 
         parameters = dict(context.get("parameters") or {})
         outcome = self._detection_runner(video_path, video_start, parameters)
+        source_started_at = _normalize_datetime_text(
+            outcome.detection.get("video_start_time") or video_start
+        )
+        source_ended_at = _normalize_datetime_text(
+            outcome.detection.get("video_end_time")
+            or context.get("source_ended_at")
+            or (
+                video_start
+                + timedelta(seconds=_float(outcome.detection.get("duration_seconds")))
+            )
+        )
         detection_record, alarm_record = self.store.record_detection(
             session_id,
             source_type="video",
@@ -170,6 +207,9 @@ class AgentTools:
             detection=outcome.detection,
             alarm_document=outcome.alarm_document,
             alarm_report=outcome.alarm_report,
+            line_id=str(context.get("line_id") or ""),
+            source_started_at=source_started_at,
+            source_ended_at=source_ended_at,
         )
         event_count = _integer(
             outcome.detection.get("num_events"),
@@ -190,6 +230,9 @@ class AgentTools:
                 "alarm_status": alarm_record.status,
                 "event_count": event_count,
                 "class_counts": outcome.detection.get("class_counts") or {},
+                "line_id": detection_record.line_id,
+                "source_started_at": detection_record.source_started_at,
+                "source_ended_at": detection_record.source_ended_at,
                 "result_json": outcome.result_json,
                 "alarm_json": outcome.alarm_json,
                 "alarm_report_path": outcome.alarm_report_path,
@@ -259,6 +302,259 @@ class AgentTools:
         )
         return {"ok": True, "reply": report, "data": {**summary, "report": report}}
 
+    def assess_risk(self, session_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        del session_id
+        raw_json = context.get("detection_json")
+        detection = context.get("detection")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        output_dir = OUTPUTS_DIR / "agent_risk_assessments" / timestamp
+        if raw_json:
+            input_json = Path(str(raw_json)).expanduser()
+            if not input_json.is_file():
+                return {
+                    "ok": False,
+                    "reply": f"找不到检测结果 JSON：{input_json}",
+                    "data": {"detection_json": str(input_json)},
+                }
+            detection = json.loads(input_json.read_text(encoding="utf-8"))
+        elif isinstance(detection, dict):
+            output_dir.mkdir(parents=True, exist_ok=True)
+            input_json = output_dir / "detection_input.json"
+            input_json.write_text(
+                json.dumps(detection, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        else:
+            return {
+                "ok": False,
+                "reply": "请提供 detection_json 路径或 detection 对象。",
+                "data": {},
+            }
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        alarm_json = output_dir / "unified_alarm.json"
+        alarm_report_path = output_dir / "alarm_report.txt"
+        from task3_alarm.alarm_rule_engine import complete_detection_alarm
+
+        alarm_document, alarm_report = complete_detection_alarm(
+            detection,
+            input_json=input_json,
+            output_json=alarm_json,
+            output_txt=alarm_report_path,
+            source_type=str(context.get("source_type") or "auto"),
+        )
+        overall = alarm_document.get("overall_risk") or {}
+        generated = alarm_document.get("generated_report") or {}
+        risk_level = str(overall.get("level") or "none")
+        return {
+            "ok": True,
+            "reply": (
+                f"风险研判完成：{RISK_NAMES.get(risk_level, risk_level)}。"
+                f"处置建议：{generated.get('recommended_action') or '继续监测。'}"
+            ),
+            "data": {
+                "risk_level": risk_level,
+                "requires_stop": bool(overall.get("requires_stop")),
+                "reason": overall.get("reason") or "",
+                "recommended_action": generated.get("recommended_action") or "",
+                "alarm_document": alarm_document,
+                "alarm_report": alarm_report,
+                "alarm_json": self._display_path(alarm_json),
+                "alarm_report_path": self._display_path(alarm_report_path),
+            },
+        }
+
+    def parse_detection_result(
+        self, session_id: str, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        del session_id
+        raw_json = context.get("detection_json")
+        detection = context.get("detection")
+        if raw_json:
+            input_json = Path(str(raw_json)).expanduser()
+            if not input_json.is_file():
+                return {
+                    "ok": False,
+                    "reply": f"找不到检测结果 JSON：{input_json}",
+                    "data": {"detection_json": str(input_json)},
+                }
+            detection = json.loads(input_json.read_text(encoding="utf-8"))
+        elif isinstance(detection, dict):
+            input_json = PROJECT_ROOT / "in_memory_detection.json"
+        else:
+            return {
+                "ok": False,
+                "reply": "请提供 detection_json 路径或 detection 对象。",
+                "data": {},
+            }
+
+        from task3_alarm.unified_alarm import convert_detection
+
+        normalized = convert_detection(
+            detection,
+            input_json=input_json,
+            source_type=str(context.get("source_type") or "auto"),
+        )
+        source = normalized.get("source") or {}
+        summary = normalized.get("detection_summary") or {}
+        events = normalized.get("events") or []
+        return {
+            "ok": True,
+            "reply": (
+                f"检测结果解析完成：来源 {source.get('type') or 'unknown'}，"
+                f"共 {len(events)} 个事件。"
+            ),
+            "data": {
+                "source": source,
+                "detection_summary": summary,
+                "events": events,
+                "event_count": len(events),
+                "normalized_detection": normalized,
+                "candidate_count": _integer(detection.get("num_candidates")),
+                "candidates": detection.get("candidates")
+                or detection.get("unknown_candidates")
+                or [],
+            },
+        }
+
+    def current_alarm(self, session_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        alarm = self.store.current_alarm(
+            session_id if context.get("session_only", False) else None,
+            line_id=str(context.get("line_id") or ""),
+        )
+        if alarm is None:
+            return {
+                "ok": True,
+                "reply": "当前没有可查看的报警。",
+                "data": {"found": False},
+            }
+        return {
+            "ok": True,
+            "reply": (
+                f"当前报警 {alarm.id}：{RISK_NAMES.get(alarm.risk_level, alarm.risk_level)}，"
+                f"状态 {alarm.status}。"
+            ),
+            "data": {
+                "found": True,
+                "alarm_id": alarm.id,
+                "detection_id": alarm.detection_id,
+                "risk_level": alarm.risk_level,
+                "alarm_status": alarm.status,
+                "requires_stop": alarm.requires_stop,
+                "report": alarm.report,
+                "report_text": alarm.report_text,
+                "created_at": alarm.created_at,
+                "updated_at": alarm.updated_at,
+            },
+        }
+
+    def query_history(self, session_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        del session_id
+        records = self.store.query_detections(
+            start_time=_normalize_datetime_text(context.get("start_time")),
+            end_time=_normalize_datetime_text(context.get("end_time")),
+            risk_level=str(context.get("risk_level") or ""),
+            line_id=str(context.get("line_id") or ""),
+            source_type=str(context.get("source_type") or ""),
+            review_status=str(context.get("review_status") or ""),
+            limit=_integer(context.get("limit"), 100),
+        )
+        include_details = bool(context.get("include_details", True))
+        items = []
+        for record in records:
+            item = {
+                "detection_id": record.id,
+                "source_type": record.source_type,
+                "source_path": record.source_path,
+                "line_id": record.line_id,
+                "source_started_at": record.source_started_at,
+                "source_ended_at": record.source_ended_at,
+                "risk_level": record.risk_level,
+                "status": record.status,
+                "review_status": record.review_status,
+                "review_note": record.review_note,
+                "reviewer": record.reviewer,
+                "reviewed_at": record.reviewed_at,
+                "class_counts": record.summary.get("class_counts") or {},
+                "created_at": record.created_at,
+            }
+            if include_details:
+                item["detection"] = record.summary
+                item["alarm_report"] = record.alarm_report
+            items.append(item)
+        return {
+            "ok": True,
+            "reply": f"共查询到 {len(items)} 条检测记录。",
+            "data": {"count": len(items), "records": items},
+        }
+
+    def generate_risk_report(
+        self, session_id: str, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        del session_id
+        target_date = context.get("date")
+        start_time = context.get("start_time")
+        end_time = context.get("end_time")
+        if target_date and not start_time and not end_time:
+            day = target_date if isinstance(target_date, date) else date.fromisoformat(str(target_date))
+            timezone = self._now().tzinfo
+            start_time = datetime.combine(day, time.min, tzinfo=timezone)
+            end_time = datetime.combine(day, time.max, tzinfo=timezone)
+        summary = self.store.filtered_summary(
+            start_time=_normalize_datetime_text(start_time),
+            end_time=_normalize_datetime_text(end_time),
+            risk_level=str(context.get("risk_level") or ""),
+            line_id=str(context.get("line_id") or ""),
+            source_type=str(context.get("source_type") or ""),
+            review_status=str(context.get("review_status") or ""),
+        )
+        risks = summary["risk_counts"]
+        alarm_statuses = summary["alarm_status_counts"]
+        classes = summary["class_counts"]
+        class_text = "、".join(f"{name}{count}个" for name, count in classes.items()) or "无"
+        report = (
+            "风险汇总报告\n"
+            f"- 时间范围：{summary['start_time'] or '不限'} 至 {summary['end_time'] or '不限'}\n"
+            f"- 线路：{summary['line_id'] or '全部'}\n"
+            f"- 检测轮次：{summary['detection_count']}\n"
+            f"- 高/中/低风险：{risks.get('high', 0)}/{risks.get('medium', 0)}/{risks.get('low', 0)}\n"
+            f"- 待确认/已确认/已取消报警：{alarm_statuses.get('pending', 0)}/"
+            f"{alarm_statuses.get('confirmed', 0)}/{alarm_statuses.get('cancelled', 0)}\n"
+            f"- 异物统计：{class_text}"
+        )
+        return {"ok": True, "reply": report, "data": {**summary, "report": report}}
+
+    def review_detection(self, session_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        detection_id = str(context.get("detection_id") or "").strip()
+        if not detection_id:
+            latest = self.store.latest_detection(session_id)
+            detection_id = latest.id if latest else ""
+        if not detection_id:
+            return {
+                "ok": False,
+                "reply": "没有找到可复核的检测记录。",
+                "data": {"found": False},
+            }
+        updated = self.store.set_detection_review(
+            detection_id,
+            session_id,
+            str(context.get("action") or "confirm"),
+            reviewer=str(context.get("reviewer") or ""),
+            note=str(context.get("note") or ""),
+        )
+        return {
+            "ok": True,
+            "reply": f"检测记录 {updated.id} 已更新为 {updated.review_status}。",
+            "data": {
+                "found": True,
+                "detection_id": updated.id,
+                "review_status": updated.review_status,
+                "reviewer": updated.reviewer,
+                "review_note": updated.review_note,
+                "reviewed_at": updated.reviewed_at,
+            },
+        }
+
     def confirm_alarm(self, session_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
         return self._control_alarm("confirm", session_id, context)
 
@@ -287,7 +583,12 @@ class AgentTools:
 
         if self._alarm_control_handler is not None:
             self._alarm_control_handler(action, alarm)
-        updated = self.store.set_alarm_action(alarm.id, session_id, action)
+        updated = self.store.set_alarm_action(
+            alarm.id,
+            session_id,
+            action,
+            note=str(context.get("note") or ""),
+        )
         action_text = "确认" if action == "confirm" else "取消"
         return {
             "ok": True,
