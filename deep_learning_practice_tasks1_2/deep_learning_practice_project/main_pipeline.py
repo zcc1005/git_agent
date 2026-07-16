@@ -155,8 +155,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--conf",
         type=float,
-        default=0.15,
-        help="YOLO 最低检测阈值，低于该值忽略",
+        default=0.25,
+        help="YOLO 最低检测阈值，低于该值忽略（默认 0.25）",
     )
     parser.add_argument(
         "--known-conf",
@@ -164,7 +164,7 @@ def parse_args() -> argparse.Namespace:
         dest="known_conf",
         type=float,
         default=0.40,
-        help="已知类别阈值，conf 到该值之间输出 unknown",
+        help="类别确认阈值，conf 到该值之间作为待确认候选，不触发报警",
     )
     parser.add_argument("--skip_alarm", action="store_true", help="只运行到 detection.json，不生成报警文本")
     return parser.parse_args()

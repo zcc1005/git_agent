@@ -5,7 +5,7 @@
 - 异物检测：基于 YOLOv8 识别 `unknown/stone/plastic/metal/wood`，支持图片和视频。
 - 规则报警：将检测结果转换为统一事件 JSON，通过确定性规则生成风险等级、处置动作和报警报告。
 
-旧的 `go/stop/yes/no` 语音关键词模型和 LoRA-Qwen 报告链路已下线。网页暂时保留手动检测与报警控制，后续由自然语言智能体入口替代。
+旧的 `go/stop/yes/no` 语音关键词模型和 LoRA-Qwen 报告链路已下线。网页同时支持手动检测、报警控制和自然语言智能体入口。
 
 ## 1. 环境安装
 
@@ -82,11 +82,13 @@ python task2_yolo/train_yolo.py --model yolov8s.pt --epochs 150 --imgsz 800 --ba
 python task2_yolo/detect_yolo.py --source data/yolo_yiwu/images/test
 ```
 
-检测采用双阈值：低于 `0.15` 当作背景，`0.15-0.40` 输出 `unknown`，不低于 `0.40` 输出四个已知类别。可通过 `--conf` 和 `--known-conf` 调整：
+检测采用确认阈值：低于 `0.25` 当作背景，`0.25-0.40` 作为待确认候选且不触发报警，不低于 `0.40` 输出四个已知类别。图片推理默认使用 `imgsz=800`，并执行 NMS、包含关系去重、强重叠跨类别竞争和大背景框过滤。可通过 `--conf`、`--known-conf`、`--nms-iou` 和 `--duplicate-iou` 调整：
 
 ```bash
-python task2_yolo/detect_yolo.py --source data/yolo_yiwu/images/test --conf 0.15 --known-conf 0.40
+python task2_yolo/detect_yolo.py --source data/yolo_yiwu/images/test --conf 0.25 --known-conf 0.40 --nms-iou 0.40 --duplicate-iou 0.45
 ```
+
+如需兼容旧流程、让低置信度候选直接作为 `unknown` 报警，可显式添加 `--confirm-low-confidence-unknown`；默认关闭，避免把低分石块误报为未知异物。
 
 调试时可忽略语音命令直接检测：
 
@@ -153,7 +155,7 @@ python -m unittest discover -s tests -v
 python main_pipeline.py --command go --source data/yolo_yiwu/images/test
 ```
 
-启动支持图片和视频检测的网页：
+启动支持图片、视频和智能助手的网页：
 
 ```powershell
 python web_app.py
@@ -161,10 +163,21 @@ python web_app.py
 
 浏览器访问 `http://127.0.0.1:5000`。
 
+智能助手支持：
+
+- 检测这张图片。
+- 检测这段视频。
+- 查询上一轮结果。
+- 统计今天的高风险报警次数。
+- 生成今日风险报告。
+- 确认或取消报警。
+
+对话、检测轮次和报警动作保存在 `outputs/agent_history.sqlite3`。当前默认使用规则优先的混合意图识别；未接入大模型时自动运行纯规则逻辑。
+
 最终链路：
 
 ```text
-手动检测控制
+手动检测控制 / 自然语言智能体
 ↓
 detection.json + detections_vis
 ↓

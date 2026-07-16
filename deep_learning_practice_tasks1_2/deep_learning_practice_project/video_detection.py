@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
+os.environ.setdefault(
+    "YOLO_CONFIG_DIR", str(_LOCAL_PROJECT_ROOT / "outputs" / "ultralytics_runtime")
+)
 
 import cv2
 from ultralytics import YOLO
@@ -18,19 +24,22 @@ from task2_yolo.detect_yolo import (
     normalize_class_name,
     validate_four_class_model,
 )
+from task2_yolo.postprocess import filter_duplicate_objects as shared_duplicate_filter
 from task2_yolo.yolo_config import CLASS_DISPLAY_NAMES, CLASS_NAMES
 
 
 DEFAULT_IMGSZ = 800
-DEFAULT_NMS_IOU = 0.45
-DEFAULT_DUPLICATE_IOU = 0.55
-DEFAULT_DUPLICATE_CONTAINMENT = 0.85
+DEFAULT_NMS_IOU = 0.40
+DEFAULT_DUPLICATE_IOU = 0.45
+DEFAULT_DUPLICATE_CONTAINMENT = 0.80
+DEFAULT_CROSS_CLASS_IOU = 0.70
+DEFAULT_CROSS_CLASS_CONTAINMENT = 0.92
 DEFAULT_EVENT_SILENCE_SECONDS = 1.0
 DEFAULT_TRACK_MAX_AGE_SECONDS = 1.0
 DEFAULT_TRACK_IOU = 0.15
 DEFAULT_TRACK_CENTER_DISTANCE_RATIO = 3.0
 DEFAULT_MIN_UNKNOWN_HITS = 2
-DEFAULT_UNKNOWN_SINGLE_FRAME_CONF = 0.38
+DEFAULT_UNKNOWN_SINGLE_FRAME_CONF = 0.40
 
 
 def parse_video_start_time(value: str) -> datetime:
@@ -172,49 +181,23 @@ def filter_duplicate_objects(
     duplicate_iou: float = DEFAULT_DUPLICATE_IOU,
     containment_threshold: float = DEFAULT_DUPLICATE_CONTAINMENT,
     class_agnostic: bool = False,
+    cross_class_iou: float = DEFAULT_CROSS_CLASS_IOU,
+    cross_class_containment: float = DEFAULT_CROSS_CLASS_CONTAINMENT,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Second-stage duplicate suppression after Ultralytics NMS.
 
-    Suppression defaults to same predicted class. This avoids deleting two adjacent
-    objects of different classes while still removing the low-confidence duplicate
-    that would otherwise be renamed to unknown later.
+    Same-class boxes use the normal thresholds. Competing cross-class boxes are
+    suppressed only at much stronger overlap/containment thresholds.
     """
 
-    canonical = [_canonical_raw_object(item) for item in raw_objects]
-    ordered = sorted(canonical, key=lambda item: item["confidence"], reverse=True)
-    kept: List[Dict[str, Any]] = []
-    ignored: List[Dict[str, Any]] = []
-    for candidate in ordered:
-        duplicate_of: Optional[Dict[str, Any]] = None
-        duplicate_reason = ""
-        for accepted in kept:
-            same_class = candidate["predicted_class"] == accepted["predicted_class"]
-            if not (same_class or class_agnostic):
-                continue
-            overlap = bbox_iou(candidate["bbox_xyxy"], accepted["bbox_xyxy"])
-            containment = bbox_containment(
-                candidate["bbox_xyxy"], accepted["bbox_xyxy"]
-            )
-            if overlap >= duplicate_iou:
-                duplicate_of = accepted
-                duplicate_reason = f"duplicate_iou={overlap:.3f}"
-                break
-            if containment >= containment_threshold:
-                duplicate_of = accepted
-                duplicate_reason = f"duplicate_containment={containment:.3f}"
-                break
-        if duplicate_of is None:
-            kept.append(candidate)
-        else:
-            ignored.append(
-                {
-                    **candidate,
-                    "detection_state": "background_ignored",
-                    "filter_reason": duplicate_reason,
-                    "kept_confidence": duplicate_of["confidence"],
-                }
-            )
-    return kept, ignored
+    return shared_duplicate_filter(
+        raw_objects,
+        duplicate_iou=duplicate_iou,
+        containment_threshold=containment_threshold,
+        class_agnostic=class_agnostic,
+        cross_class_iou=cross_class_iou,
+        cross_class_containment=cross_class_containment,
+    )
 
 
 @dataclass
@@ -271,7 +254,7 @@ class LightweightTracker:
     def _new_track(self, detection: Dict[str, Any], offset_seconds: float) -> TrackState:
         confidence = float(detection["confidence"])
         known = confidence >= self.known_conf
-        confirmed_unknown = not known and (
+        confirmed_candidate = not known and (
             confidence >= self.unknown_single_frame_conf
             or self.min_unknown_hits <= 1
         )
@@ -286,20 +269,22 @@ class LightweightTracker:
             hit_count=1,
             consecutive_hits=1,
             max_confidence=confidence,
-            confirmed=known or confirmed_unknown,
-            confirmed_class=detection["predicted_class"] if known else ("unknown" if confirmed_unknown else None),
+            confirmed=known or confirmed_candidate,
+            confirmed_class=(
+                detection["predicted_class"] if known or confirmed_candidate else None
+            ),
             confirmed_class_name=(
                 detection["predicted_class_name"]
-                if known
-                else (CLASS_DISPLAY_NAMES["unknown"] if confirmed_unknown else None)
+                if known or confirmed_candidate
+                else None
             ),
             confirmation_reason=(
                 "known_confidence"
                 if known
                 else (
-                    "single_high_unknown_candidate"
+                    "single_high_class_candidate"
                     if confidence >= self.unknown_single_frame_conf
-                    else ("repeated_unknown_candidate" if confirmed_unknown else None)
+                    else ("repeated_class_candidate" if confirmed_candidate else None)
                 )
             ),
         )
@@ -358,14 +343,16 @@ class LightweightTracker:
             track.predicted_class_id = detection["predicted_class_id"]
         elif not track.confirmed and float(detection["confidence"]) >= self.unknown_single_frame_conf:
             track.confirmed = True
-            track.confirmed_class = "unknown"
-            track.confirmed_class_name = CLASS_DISPLAY_NAMES["unknown"]
-            track.confirmation_reason = "single_high_unknown_candidate"
+            track.confirmed_class = detection["predicted_class"]
+            track.confirmed_class_name = detection["predicted_class_name"]
+            track.predicted_class_id = detection["predicted_class_id"]
+            track.confirmation_reason = "single_high_class_candidate"
         elif not track.confirmed and track.consecutive_hits >= self.min_unknown_hits:
             track.confirmed = True
-            track.confirmed_class = "unknown"
-            track.confirmed_class_name = CLASS_DISPLAY_NAMES["unknown"]
-            track.confirmation_reason = "repeated_unknown_candidate"
+            track.confirmed_class = detection["predicted_class"]
+            track.confirmed_class_name = detection["predicted_class_name"]
+            track.predicted_class_id = detection["predicted_class_id"]
+            track.confirmation_reason = "repeated_class_candidate"
 
     def _decorate_detection(
         self, detection: Dict[str, Any], track: TrackState, match_type: str
@@ -377,10 +364,8 @@ class LightweightTracker:
             class_id = track.predicted_class_id if class_key != "unknown" else None
             if track.confirmation_reason == "known_confidence" and confidence >= self.known_conf:
                 detection_state = "confirmed_known"
-            elif track.confirmation_reason == "known_confidence":
-                detection_state = "confirmed_by_track"
             else:
-                detection_state = "confirmed_unknown"
+                detection_state = "confirmed_by_track"
         else:
             class_key = "unknown"
             class_name = CLASS_DISPLAY_NAMES["unknown"]
@@ -655,7 +640,7 @@ def merge_detection_events(
 ) -> List[Dict[str, Any]]:
     """Group only frames containing confirmed tracked objects.
 
-    Candidate-only frames are deliberately excluded, so a weak one-frame unknown
+    Candidate-only frames are deliberately excluded, so a weak one-frame candidate
     cannot bridge two otherwise separate waves.
     """
 
@@ -715,7 +700,7 @@ def _validate_parameters(
     if not 0 <= conf < known_conf <= 1:
         raise ValueError("置信度必须满足 0 <= 最低置信度 < 已知类别置信度 <= 1。")
     if not conf <= unknown_single_frame_conf <= known_conf:
-        raise ValueError("单帧 unknown 确认阈值必须位于最低置信度和已知类别阈值之间。")
+        raise ValueError("单帧候选确认阈值必须位于最低置信度和类别确认阈值之间。")
     if imgsz < 32:
         raise ValueError("推理尺寸 imgsz 必须不小于 32。")
     if not 0 < nms_iou < 1 or not 0 < duplicate_iou < 1:
@@ -731,8 +716,8 @@ def detect_video_foreign_objects(
     model_path: Path,
     output_dir: Path,
     video_start: datetime,
-    sample_fps: float = 2.0,
-    conf: float = 0.15,
+    sample_fps: float = 4.0,
+    conf: float = 0.25,
     known_conf: float = 0.40,
     imgsz: int = DEFAULT_IMGSZ,
     nms_iou: float = DEFAULT_NMS_IOU,
@@ -965,7 +950,7 @@ def detect_video_foreign_objects(
         "notes": {
             "raw_objects": "Ultralytics NMS 后、应用层二次去重前的模型框",
             "ignored_objects": "应用层判定为重复/包含关系的调试框",
-            "unknown_candidates": "未达到确认规则，不触发报警、不延长事件",
+            "unknown_candidates": "兼容字段名：未达到确认规则的候选框，不触发报警、不延长事件",
             "objects": "已确认并带 track_id 的正式报警框",
         },
     }

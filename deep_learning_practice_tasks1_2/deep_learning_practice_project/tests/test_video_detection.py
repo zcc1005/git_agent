@@ -86,11 +86,11 @@ class VideoDetectionLogicTests(unittest.TestCase):
         self.assertEqual(len(ignored), 2)
         self.assertTrue(all(item["detection_state"] == "background_ignored" for item in ignored))
 
-    def test_unknown_requires_repeated_hits(self) -> None:
+    def test_low_confidence_class_requires_repeated_hits(self) -> None:
         tracker = LightweightTracker(
             known_conf=0.4,
             min_unknown_hits=2,
-            unknown_single_frame_conf=0.38,
+            unknown_single_frame_conf=0.4,
         )
         first = process_frame_objects(
             [raw_object("stone", 0.30, [100, 100, 200, 200])], tracker, 0.0
@@ -101,10 +101,25 @@ class VideoDetectionLogicTests(unittest.TestCase):
 
         self.assertEqual(first["objects"], [])
         self.assertEqual(first["unknown_candidates"][0]["detection_state"], "unknown_candidate")
-        self.assertEqual(second["objects"][0]["detection_state"], "confirmed_unknown")
+        self.assertEqual(second["objects"][0]["detection_state"], "confirmed_by_track")
+        self.assertEqual(second["objects"][0]["class"], "stone")
+        self.assertFalse(second["objects"][0]["rejected_as_unknown"])
         self.assertEqual(
             first["unknown_candidates"][0]["track_id"], second["objects"][0]["track_id"]
         )
+
+    def test_strong_cross_class_overlap_keeps_one_competing_box(self) -> None:
+        detections = [
+            raw_object("stone", 0.62, [10, 10, 110, 110], 0),
+            raw_object("wood", 0.55, [12, 12, 108, 108], 3),
+        ]
+
+        kept, ignored = filter_duplicate_objects(detections)
+
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0]["predicted_class"], "stone")
+        self.assertEqual(len(ignored), 1)
+        self.assertIn("cross_class_", ignored[0]["filter_reason"])
 
     def test_single_unknown_candidate_does_not_bridge_events(self) -> None:
         first_tracker = LightweightTracker()

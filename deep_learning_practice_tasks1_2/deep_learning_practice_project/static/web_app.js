@@ -125,7 +125,9 @@ function updateResult(data) {
   const detection = data.detection || {};
   const hasForeignObject = detection.has_foreign_object ?? detection.has_yiwu;
   const classSummary = formatClassCounts(detection.class_counts);
-  detectionSummary.textContent = `${detection.num_images || 0} 张图片，${detection.num_detections || 0} 个目标，异物：${Boolean(hasForeignObject)}，类型：${classSummary}`;
+  const candidateCount = detection.num_candidates || 0;
+  const ignoredCount = detection.num_ignored || 0;
+  detectionSummary.textContent = `${detection.num_images || 0} 张图片，${detection.num_detections || 0} 个确认目标，${candidateCount} 个待确认，过滤 ${ignoredCount} 个重复/背景框，异物：${Boolean(hasForeignObject)}，类型：${classSummary}`;
   detectionJson.textContent = prettyJson(detection);
 
   const riskLevelNames = { none: "无报警", low: "低风险", medium: "中风险", high: "高风险" };
@@ -204,10 +206,7 @@ async function runPipeline() {
     return;
   }
 
-  const body = new FormData();
-  body.append("command", document.querySelector("input[name='command']:checked").value);
-  body.append("image", imageInput.files[0]);
-  body.append("conf", document.getElementById("confInput").value || "0.15");
+  const body = new FormData(form);
 
   setBusy(true, "流程运行中");
   startSlowProgress(15, 92, "正在运行完整流程");

@@ -9,6 +9,7 @@ from typing import Any, Dict
 from flask import Flask, jsonify, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
 
+from agent import AgentService, AgentTools
 from extract_video_frames import save_uploaded_video
 from main_pipeline import (
     ALARM_REPORT,
@@ -24,6 +25,7 @@ from main_pipeline import (
 )
 from task2_yolo.detect_yolo import detect_yiwu, make_skipped_json, read_command, should_start_detection
 from task3_alarm.alarm_rule_engine import complete_detection_alarm
+from storage import AlarmRecord, SQLiteHistoryStore
 from video_detection import (
     DEFAULT_DUPLICATE_IOU,
     DEFAULT_EVENT_SILENCE_SECONDS,
@@ -45,8 +47,10 @@ pipeline_lock = threading.Lock()
 
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 UPLOAD_DIR = OUTPUTS_DIR / "web_inputs"
+AGENT_IMAGE_UPLOAD_DIR = OUTPUTS_DIR / "agent_inputs" / "images"
 ACTIVE_ALARM_REPORT = OUTPUTS_DIR / "alarm_report_active.txt"
 VIDEO_DETECTIONS_DIR = OUTPUTS_DIR / "video_detections"
+AGENT_HISTORY_DB = OUTPUTS_DIR / "agent_history.sqlite3"
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
@@ -71,21 +75,26 @@ def read_text_file(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def save_uploaded_image() -> Path:
-    file = request.files.get("image")
+def save_uploaded_image_file(file, upload_dir: Path = UPLOAD_DIR) -> Path:
     if file is None or not file.filename:
         raise ValueError("请先选择一张需要检测的图片。")
 
-    original_name = secure_filename(file.filename)
-    suffix = Path(original_name).suffix.lower()
+    safe_name = secure_filename(file.filename)
+    suffix = Path(safe_name).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise ValueError("仅支持 jpg、jpeg、png、bmp、webp 格式图片。")
+    safe_stem = Path(safe_name).stem[:80] or "image"
+    original_name = f"{safe_stem}{suffix}"
 
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    upload_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    image_path = UPLOAD_DIR / f"{timestamp}_{original_name}"
+    image_path = upload_dir / f"{timestamp}_{original_name}"
     file.save(image_path)
     return image_path
+
+
+def save_uploaded_image() -> Path:
+    return save_uploaded_image_file(request.files.get("image"))
 
 
 def find_visualization_image(image_path: Path) -> Path | None:
@@ -196,13 +205,21 @@ def build_response(image_path: Path | None = None) -> Dict[str, Any]:
         "detection": {
             "status": detection.get("status", "unknown"),
             "num_images": detection.get("num_images", 0),
+            "num_raw_detections": detection.get("num_raw_detections", 0),
             "num_detections": detection.get("num_detections", 0),
+            "num_candidates": detection.get("num_candidates", 0),
+            "num_ignored": detection.get("num_ignored", 0),
             "has_yiwu": detection.get("has_yiwu", False),
             "has_foreign_object": detection.get(
                 "has_foreign_object", detection.get("has_yiwu", False)
             ),
             "class_counts": detection.get("class_counts", {}),
+            "candidate_counts": detection.get("candidate_counts", {}),
             "objects": detection.get("objects", []),
+            "candidate_objects": detection.get("candidate_objects", []),
+            "ignored_objects": detection.get("ignored_objects", []),
+            "thresholds": detection.get("thresholds", {}),
+            "inference_parameters": detection.get("inference_parameters", {}),
             "output": display_path(DETECTION_JSON),
         },
         "alarm_report": alarm_text,
@@ -272,6 +289,34 @@ def write_cancelled_alarm_report() -> None:
     ALARM_REPORT.write_text(text + "\n", encoding="utf-8")
 
 
+def apply_agent_alarm_control(action: str, alarm: AlarmRecord) -> None:
+    """Bridge conversational alarm actions to the existing control command."""
+    del alarm
+    if action == "confirm":
+        write_alarm_control_command("yes")
+    elif action == "cancel":
+        write_alarm_control_command("no")
+    else:
+        raise ValueError(f"不支持的智能体报警动作：{action}")
+
+
+agent_history_store = SQLiteHistoryStore(AGENT_HISTORY_DB)
+agent_tools = AgentTools(
+    agent_history_store,
+    alarm_control_handler=apply_agent_alarm_control,
+)
+app.config["AGENT_SERVICE"] = AgentService(agent_history_store, tools=agent_tools)
+
+
+def get_agent_service() -> AgentService:
+    service = app.config.get("AGENT_SERVICE")
+    if not isinstance(service, AgentService) and not (
+        hasattr(service, "chat") and hasattr(service, "history")
+    ):
+        raise RuntimeError("AGENT_SERVICE 未正确初始化")
+    return service
+
+
 @app.get("/")
 def index():
     return render_template("web_index.html")
@@ -282,11 +327,78 @@ def output_file(filename: str):
     return send_from_directory(OUTPUTS_DIR, filename)
 
 
+@app.post("/api/agent/chat")
+def api_agent_chat():
+    try:
+        message = request.form.get("message", "").strip()
+        session_id = request.form.get("session_id", "default").strip() or "default"
+        if not message:
+            raise ValueError("聊天消息不能为空")
+        if len(message) > 4000:
+            raise ValueError("聊天消息不能超过 4000 个字符")
+        if len(session_id) > 128:
+            raise ValueError("session_id 不能超过 128 个字符")
+
+        context: Dict[str, Any] = {}
+        uploaded_media = (
+            request.files.get("media")
+            or request.files.get("image")
+            or request.files.get("video")
+        )
+        with pipeline_lock:
+            if uploaded_media is not None and uploaded_media.filename:
+                suffix = Path(uploaded_media.filename).suffix.lower()
+                if suffix in ALLOWED_EXTENSIONS:
+                    context["image_path"] = str(
+                        save_uploaded_image_file(uploaded_media, AGENT_IMAGE_UPLOAD_DIR)
+                    )
+                else:
+                    context["video_path"] = str(save_uploaded_video(uploaded_media))
+            video_start_time = request.form.get("video_start_time", "").strip()
+            if video_start_time:
+                context["video_start_time"] = video_start_time
+            alarm_id = request.form.get("alarm_id", "").strip()
+            if alarm_id:
+                context["alarm_id"] = alarm_id
+            response = get_agent_service().chat(
+                message,
+                session_id=session_id,
+                context=context,
+            )
+        return jsonify(response)
+    except (ValueError, FileNotFoundError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.get("/api/agent/history")
+def api_agent_history():
+    try:
+        session_id = request.args.get("session_id", "default").strip() or "default"
+        if len(session_id) > 128:
+            raise ValueError("session_id 不能超过 128 个字符")
+        limit = int(request.args.get("limit", "50"))
+        if not 1 <= limit <= 200:
+            raise ValueError("limit 必须在 1 到 200 之间")
+        messages = get_agent_service().history(session_id, limit=limit)
+        return jsonify({"ok": True, "session_id": session_id, "messages": messages})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @app.post("/api/run")
 def api_run():
     try:
         command_value = request.form.get("command", "go")
-        conf = float(request.form.get("conf", 0.15))
+        conf = float(request.form.get("conf", 0.25))
+        known_conf = float(request.form.get("known_conf", 0.40))
+        imgsz = int(request.form.get("imgsz", 800))
+        nms_iou = float(request.form.get("nms_iou", 0.40))
+        duplicate_iou = float(request.form.get("duplicate_iou", 0.45))
+        max_area_ratio = float(request.form.get("max_area_ratio", 0.65))
 
         with pipeline_lock:
             image_path = save_uploaded_image()
@@ -310,6 +422,11 @@ def api_run():
                 model_path=DEFAULT_YOLO_MODEL,
                 output_json=DETECTION_JSON,
                 conf=conf,
+                known_conf=known_conf,
+                imgsz=imgsz,
+                nms_iou=nms_iou,
+                duplicate_iou=duplicate_iou,
+                max_area_ratio=max_area_ratio,
             )
 
             complete_detection_alarm(
@@ -335,7 +452,7 @@ def api_video_detect():
 
         video_start = parse_video_start_time(request.form.get("video_start_time", ""))
         sample_fps = float(request.form.get("fps", "2"))
-        conf = float(request.form.get("conf", "0.15"))
+        conf = float(request.form.get("conf", "0.25"))
         imgsz = int(request.form.get("imgsz", str(DEFAULT_IMGSZ)))
         nms_iou = float(request.form.get("nms_iou", str(DEFAULT_NMS_IOU)))
         duplicate_iou = float(

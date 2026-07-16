@@ -1,0 +1,50 @@
+<section
+  class="agent-chat"
+  data-agent-chat
+  data-endpoint="/api/agent/chat"
+  data-history-endpoint="/api/agent/history"
+  aria-labelledby="agentChatTitle"
+>
+  <header class="agent-chat__header">
+    <div>
+      <h2 id="agentChatTitle">智能巡检助手</h2>
+      <p>用自然语言调用图片/视频检测、历史查询、风险报告与报警控制。</p>
+    </div>
+    <span class="agent-chat__status" data-agent-status>待命</span>
+  </header>
+
+  <div class="agent-chat__messages" data-agent-messages aria-live="polite">
+    <article class="agent-chat__message agent-chat__message--assistant">
+      <span>助手</span>
+      <p>可以上传图片或视频，然后说“检测这张图片”或“检测这段视频”。</p>
+    </article>
+  </div>
+
+  <div class="agent-chat__quick-actions" aria-label="快捷指令">
+    <button type="button" data-agent-prompt="检测这张图片">检测这张图片</button>
+    <button type="button" data-agent-prompt="检测这段视频">检测这段视频</button>
+    <button type="button" data-agent-prompt="查询上一轮结果">上一轮结果</button>
+    <button type="button" data-agent-prompt="今天有几次高风险报警">今日高风险</button>
+    <button type="button" data-agent-prompt="生成今日风险报告">今日风险报告</button>
+  </div>
+
+  <form class="agent-chat__composer" data-agent-form>
+    <label class="agent-chat__attachment" title="选择待检测图片或视频">
+      <input type="file" name="media" accept="image/*,video/*,.avi,.mkv,.flv,.wmv,.mpeg,.mpg">
+      <span aria-hidden="true">＋</span>
+      <span class="agent-chat__attachment-label">附件</span>
+    </label>
+    <label class="agent-chat__input-wrap">
+      <span class="sr-only">聊天消息</span>
+      <textarea
+        name="message"
+        rows="1"
+        placeholder="输入指令，例如：查询上一轮结果"
+        autocomplete="off"
+        required
+      ></textarea>
+    </label>
+    <button class="agent-chat__send" type="submit">发送</button>
+  </form>
+  <p class="agent-chat__file" data-agent-file></p>
+</section>

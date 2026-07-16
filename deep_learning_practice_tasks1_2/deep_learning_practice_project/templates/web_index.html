@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工业皮带异物检测与智能报警系统</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='web_app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='agent_chat/agent_chat.css') }}">
 </head>
 <body>
   <main class="app-shell">
@@ -19,6 +20,7 @@
     <nav class="mode-tabs" aria-label="检测模式">
       <button type="button" class="mode-tab active" data-mode="image">图片检测</button>
       <button type="button" class="mode-tab" data-mode="video">视频检测</button>
+      <button type="button" class="mode-tab" data-mode="agent">智能助手</button>
     </nav>
 
     <section id="imageMode" class="workspace mode-panel active">
@@ -42,10 +44,37 @@
 
         <div class="param-grid">
           <label>
-            <span>YOLO 置信度</span>
-            <input id="confInput" name="conf" type="number" min="0.01" max="1" step="0.01" value="0.15">
+            <span>YOLO 最低置信度</span>
+            <input id="confInput" name="conf" type="number" min="0.01" max="0.39" step="0.01" value="0.25">
           </label>
         </div>
+
+        <details class="advanced-options">
+          <summary>图片后处理参数</summary>
+          <div class="video-param-grid">
+            <label>
+              <span>类别确认阈值</span>
+              <input name="known_conf" type="number" min="0.02" max="1" step="0.01" value="0.40">
+            </label>
+            <label>
+              <span>推理尺寸 imgsz</span>
+              <input name="imgsz" type="number" min="320" max="1920" step="32" value="800">
+            </label>
+            <label>
+              <span>YOLO NMS IoU</span>
+              <input name="nms_iou" type="number" min="0.05" max="0.95" step="0.05" value="0.40">
+            </label>
+            <label>
+              <span>二次重复框 IoU</span>
+              <input name="duplicate_iou" type="number" min="0.05" max="0.95" step="0.05" value="0.45">
+            </label>
+            <label>
+              <span>最大检测框面积比例</span>
+              <input name="max_area_ratio" type="number" min="0.10" max="0.95" step="0.05" value="0.65">
+            </label>
+          </div>
+          <div class="hint">低于类别确认阈值的框只显示为待确认候选，不触发报警。</div>
+        </details>
 
         <button id="runButton" type="submit" class="primary-button">运行完整流程</button>
       </form>
@@ -128,11 +157,11 @@
           </label>
           <label>
             <span>每秒检测帧数（FPS）</span>
-            <input id="videoFps" name="fps" type="number" min="0.1" max="60" step="0.1" value="2" required>
+            <input id="videoFps" name="fps" type="number" min="0.1" max="60" step="0.1" value="4" required>
           </label>
           <label>
             <span>YOLO 最低置信度</span>
-            <input id="videoConf" name="conf" type="number" min="0.01" max="0.39" step="0.01" value="0.15" required>
+            <input id="videoConf" name="conf" type="number" min="0.01" max="0.39" step="0.01" value="0.25" required>
           </label>
         </div>
 
@@ -145,11 +174,11 @@
             </label>
             <label>
               <span>YOLO NMS IoU</span>
-              <input name="nms_iou" type="number" min="0.05" max="0.95" step="0.05" value="0.45">
+              <input name="nms_iou" type="number" min="0.05" max="0.95" step="0.05" value="0.40">
             </label>
             <label>
               <span>二次重复框 IoU</span>
-              <input name="duplicate_iou" type="number" min="0.05" max="0.95" step="0.05" value="0.55">
+              <input name="duplicate_iou" type="number" min="0.05" max="0.95" step="0.05" value="0.45">
             </label>
             <label>
               <span>事件静默切分（秒）</span>
@@ -160,12 +189,12 @@
               <input name="track_max_age_seconds" type="number" min="0" max="10" step="0.1" value="1.0">
             </label>
             <label>
-              <span>unknown 最少连续命中</span>
+              <span>候选框最少连续命中</span>
               <input name="min_unknown_hits" type="number" min="1" max="20" step="1" value="2">
             </label>
             <label>
-              <span>unknown 单帧确认阈值</span>
-              <input name="unknown_single_frame_conf" type="number" min="0.15" max="0.40" step="0.01" value="0.38">
+              <span>候选框单帧确认阈值</span>
+              <input name="unknown_single_frame_conf" type="number" min="0.15" max="0.40" step="0.01" value="0.40">
             </label>
             <label>
               <span>轨迹中心距离比例</span>
@@ -250,8 +279,13 @@
         </section>
       </section>
     </section>
+
+    <section id="agentMode" class="agent-mode-panel mode-panel">
+      {% include "components/agent_chat.html" %}
+    </section>
   </main>
 
   <script src="{{ url_for('static', filename='web_app.js') }}"></script>
+  <script type="module" src="{{ url_for('static', filename='agent_chat/agent_chat.js') }}"></script>
 </body>
 </html>
