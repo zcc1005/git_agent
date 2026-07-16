@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,12 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
 
 from agent import AgentService, AgentTools
+from agent.llm_api import (
+    LLMAPIConfig,
+    OpenAICompatibleClient,
+    OpenAICompatibleSkillPlanner,
+    load_env_file,
+)
 from extract_video_frames import save_uploaded_video
 from main_pipeline import (
     ALARM_REPORT,
@@ -305,7 +312,32 @@ agent_tools = AgentTools(
     agent_history_store,
     alarm_control_handler=apply_agent_alarm_control,
 )
-app.config["AGENT_SERVICE"] = AgentService(agent_history_store, tools=agent_tools)
+
+
+def create_web_agent_service() -> AgentService:
+    """Create the Web agent, enabling LLM planning when it is configured."""
+    try:
+        load_env_file(PROJECT_ROOT / ".env")
+        client = OpenAICompatibleClient(LLMAPIConfig.from_env())
+        planner = OpenAICompatibleSkillPlanner(client)
+        service = AgentService(
+            agent_history_store,
+            tools=agent_tools,
+            skill_planner=planner,
+            skill_planner_mode=os.getenv("LLM_PLANNER_MODE", "hybrid"),
+        )
+    except (OSError, ValueError) as exc:
+        app.config["AGENT_LLM_ENABLED"] = False
+        app.config["AGENT_LLM_INIT_ERROR"] = str(exc)
+        app.logger.warning("Web 智能体未启用大模型规划器：%s", exc)
+        return AgentService(agent_history_store, tools=agent_tools)
+
+    app.config["AGENT_LLM_ENABLED"] = True
+    app.config.pop("AGENT_LLM_INIT_ERROR", None)
+    return service
+
+
+app.config["AGENT_SERVICE"] = create_web_agent_service()
 
 
 def get_agent_service() -> AgentService:

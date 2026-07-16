@@ -13,6 +13,8 @@ python -m agent "检测这段视频" --video data/demo/example.mp4
 
 `AgentService` 默认使用 `hybrid`，目前未注入模型时会自动退化为纯规则模式，不产生网络请求，也不需要新增依赖。
 
+实际 OpenAI-compatible API 连接、`.env` 配置和运行命令见 [`LLM_API_SETUP.md`](LLM_API_SETUP.md)。
+
 | 模式 | 行为 |
 | --- | --- |
 | `rules` | 只运行确定性规则 |

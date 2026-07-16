@@ -140,3 +140,9 @@ class SkillRegistry:
 
     def names(self) -> tuple[str, ...]:
         return tuple(self._skills)
+
+    def spec(self, skill_name: str) -> SkillSpec:
+        skill = self._skills.get(skill_name)
+        if skill is None:
+            raise LookupError(f"未注册的 Skill：{skill_name}")
+        return skill.spec

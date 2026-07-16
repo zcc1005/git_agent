@@ -1,0 +1,4 @@
+interface:
+  display_name: "检测结果解析"
+  short_description: "规范化检测JSON并提取目标位置、置信度、时间和代表帧"
+  default_prompt: "Use $parse-detection-result to normalize and explain the provided detection JSON."

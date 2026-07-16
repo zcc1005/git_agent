@@ -1,0 +1,4 @@
+interface:
+  display_name: "历史查询"
+  short_description: "按日期、时间段、风险等级、线路、来源和复核状态查询历史"
+  default_prompt: "Use $query-history to filter detection history by time, risk, line, and status."

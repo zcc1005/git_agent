@@ -1,0 +1,4 @@
+interface:
+  display_name: "人工复核"
+  short_description: "人工确认、驳回、关闭或重开检测结果并记录复核人和意见"
+  default_prompt: "Use $review-detection to record a human review decision for a detection."

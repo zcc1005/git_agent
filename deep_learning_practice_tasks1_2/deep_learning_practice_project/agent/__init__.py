@@ -8,6 +8,7 @@ from .recognizers import (
     RecognitionMode,
 )
 from .service import AgentService
+from .planners import SkillPlan, SkillPlanner, SkillPlanningError, SkillPlanStep
 from .skills import RuntimeSkill, SkillRegistry, SkillResult, SkillSpec
 from .tools import AgentTools, ImageDetectionOutcome, VideoDetectionOutcome
 
@@ -27,4 +28,8 @@ __all__ = [
     "SkillRegistry",
     "SkillResult",
     "SkillSpec",
+    "SkillPlan",
+    "SkillPlanner",
+    "SkillPlanningError",
+    "SkillPlanStep",
 ]

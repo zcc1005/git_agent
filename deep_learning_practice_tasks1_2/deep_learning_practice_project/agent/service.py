@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from project_config import OUTPUTS_DIR
 from storage import SQLiteHistoryStore
 
 from .intents import Intent
+from .intents import RuleBasedIntentRecognizer
+from .planners import SkillPlan, SkillPlanner, SkillPlanningError
 from .recognizers import (
     HybridIntentRecognizer,
     IntentRecognizer,
@@ -23,6 +26,14 @@ HELP_TEXT = (
     "按时间/风险/线路查询、人工复核和组合巡检任务。"
 )
 
+PLANNING_HINT = re.compile(
+    r"(?:\d{1,2}[：:]\d{2}.*(?:-|到|至).*\d{1,2}[：:]\d{2}|"
+    r"今天.*(?:上午|下午|早上|晚上).*(?:-|到|至)|ROI|抽帧|阈值|线路|"
+    r"风险研判|人工复核|误报|假阳性|闭环|处理完成|"
+    r"并且|然后|同时|随后|再生成|以及)",
+    re.I,
+)
+
 
 class AgentService:
     """Application facade used by CLI tests and the future Flask endpoint."""
@@ -37,6 +48,8 @@ class AgentService:
         recognition_mode: RecognitionMode | str = RecognitionMode.HYBRID,
         model_confidence_threshold: float = 0.75,
         skill_registry: Optional[SkillRegistry] = None,
+        skill_planner: Optional[SkillPlanner] = None,
+        skill_planner_mode: str = "hybrid",
     ) -> None:
         if recognizer is not None and model_recognizer is not None:
             raise ValueError("recognizer 与 model_recognizer 不能同时提供")
@@ -47,6 +60,10 @@ class AgentService:
         )
         self.tools = tools or AgentTools(self.store)
         self.skill_registry = skill_registry or create_builtin_skill_registry(self.tools)
+        self.skill_planner = skill_planner
+        self.skill_planner_mode = skill_planner_mode.strip().lower()
+        if self.skill_planner_mode not in {"hybrid", "always"}:
+            raise ValueError("skill_planner_mode 只能是 hybrid 或 always")
         self.recognizer = recognizer or HybridIntentRecognizer(
             model_recognizer=model_recognizer,
             mode=recognition_mode,
@@ -118,6 +135,143 @@ class AgentService:
     def skill_catalog(self) -> list[Dict[str, Any]]:
         return self.skill_registry.catalog()
 
+    def _run_skill_plan(
+        self,
+        message: str,
+        *,
+        session_id: str,
+        context: Dict[str, Any],
+        planning_context: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        if self.skill_planner is None:
+            raise SkillPlanningError("未配置 Skill Planner")
+        plan = self.skill_planner.plan(
+            message,
+            catalog=self.skill_catalog(),
+            context=planning_context,
+        )
+        if not isinstance(plan, SkillPlan):
+            raise SkillPlanningError("Skill Planner 必须返回 SkillPlan")
+        if plan.needs_clarification:
+            return {
+                "ok": False,
+                "session_id": session_id,
+                "intent": "skill_plan",
+                "confidence": 1.0,
+                "recognizer_source": "llm_skill_planner",
+                "recognition_metadata": {"plan": plan.to_dict()},
+                "tool_name": "skill_orchestrator",
+                "reply": plan.clarification or "请补充完成任务所需的信息。",
+                "data": {"plan": plan.to_dict(), "steps": []},
+            }
+        if not plan.steps:
+            raise SkillPlanningError("模型没有返回可执行的 Skill 步骤")
+        if len(plan.steps) > 6:
+            raise SkillPlanningError("单次计划最多允许 6 个 Skill 步骤")
+
+        self._validate_controlled_steps(message, plan)
+        step_results: list[Dict[str, Any]] = []
+        for index, step in enumerate(plan.steps):
+            if step.skill_name not in self.skill_registry.names():
+                raise SkillPlanningError(f"模型请求了未注册的 Skill：{step.skill_name}")
+            arguments = self._resolve_step_references(step.arguments, step_results)
+            spec = self.skill_registry.spec(step.skill_name)
+            for key in spec.allowed_inputs:
+                if key not in arguments and key in context:
+                    arguments[key] = context[key]
+            result = self.run_skill(
+                step.skill_name,
+                session_id=session_id,
+                arguments=arguments,
+            )
+            step_results.append(
+                {
+                    "index": index,
+                    "skill_name": step.skill_name,
+                    "arguments": arguments,
+                    **result,
+                }
+            )
+            if not result.get("ok"):
+                break
+
+        ok = len(step_results) == len(plan.steps) and all(
+            bool(item.get("ok")) for item in step_results
+        )
+        replies = [str(item.get("reply") or "") for item in step_results]
+        reply = "\n".join(text for text in replies if text)
+        if not reply:
+            reply = plan.summary or ("任务执行完成。" if ok else "任务执行未完成。")
+        return {
+            "ok": ok,
+            "session_id": session_id,
+            "intent": "skill_plan",
+            "confidence": 1.0,
+            "recognizer_source": "llm_skill_planner",
+            "recognition_metadata": {"plan": plan.to_dict()},
+            "tool_name": "skill_orchestrator",
+            "reply": reply,
+            "data": {
+                "plan": plan.to_dict(),
+                "steps": step_results,
+                "completed_steps": sum(bool(item.get("ok")) for item in step_results),
+            },
+        }
+
+    @staticmethod
+    def _resolve_step_references(
+        value: Any, step_results: list[Dict[str, Any]]
+    ) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: AgentService._resolve_step_references(item, step_results)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [
+                AgentService._resolve_step_references(item, step_results)
+                for item in value
+            ]
+        if not isinstance(value, str) or not value.startswith("$steps."):
+            return value
+        parts = value.split(".")
+        if len(parts) < 3:
+            raise SkillPlanningError(f"无效的步骤引用：{value}")
+        try:
+            current: Any = step_results[int(parts[1])]
+            for part in parts[2:]:
+                if isinstance(current, Mapping):
+                    current = current[part]
+                elif isinstance(current, list):
+                    current = current[int(part)]
+                else:
+                    raise KeyError(part)
+            return current
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
+            raise SkillPlanningError(f"无法解析步骤引用：{value}") from exc
+
+    @staticmethod
+    def _validate_controlled_steps(message: str, plan: SkillPlan) -> None:
+        explicit_intent = RuleBasedIntentRecognizer().recognize(message).intent
+        review_patterns = {
+            "confirm": re.compile(r"(?:确认|认定).*(?:检测|结果|异物)"),
+            "reject": re.compile(r"(?:驳回|误报|假阳性|不是异物)"),
+            "close": re.compile(r"(?:闭环|处理完成|处置完成|已清除|关闭检测)"),
+            "reopen": re.compile(r"(?:重开|重新打开|恢复复核)"),
+        }
+        for step in plan.steps:
+            default_action = "confirm" if step.skill_name == "review-detection" else ""
+            action = str(step.arguments.get("action") or default_action).lower()
+            if step.skill_name == "control-alarm" and action in {"confirm", "cancel"}:
+                expected = (
+                    Intent.CONFIRM_ALARM if action == "confirm" else Intent.CANCEL_ALARM
+                )
+                if explicit_intent != expected:
+                    raise SkillPlanningError("报警确认或取消必须来自用户的明确动作指令")
+            if step.skill_name == "review-detection" and action in review_patterns:
+                if not review_patterns[action].search(message):
+                    raise SkillPlanningError("检测复核写操作必须来自用户的明确动作指令")
+
     def chat(
         self,
         message: str,
@@ -136,7 +290,32 @@ class AgentService:
         }
         match = self.recognizer.recognize(message, context=recognition_context)
 
-        if match.intent in {Intent.HELP, Intent.UNKNOWN}:
+        use_skill_planner = self.skill_planner is not None and match.intent != Intent.HELP and (
+            self.skill_planner_mode == "always"
+            or match.intent == Intent.UNKNOWN
+            or bool(PLANNING_HINT.search(message))
+        )
+        if use_skill_planner:
+            try:
+                response = self._run_skill_plan(
+                    message,
+                    session_id=session_id,
+                    context=dict(context or {}),
+                    planning_context=recognition_context,
+                )
+            except SkillPlanningError as exc:
+                response = {
+                    "ok": False,
+                    "session_id": session_id,
+                    "intent": "skill_plan",
+                    "confidence": 0.0,
+                    "recognizer_source": "llm_skill_planner_error",
+                    "recognition_metadata": {"error": str(exc)},
+                    "tool_name": "skill_orchestrator",
+                    "reply": f"大模型任务规划失败：{exc}",
+                    "data": {},
+                }
+        elif match.intent in {Intent.HELP, Intent.UNKNOWN}:
             reply = HELP_TEXT if match.intent == Intent.HELP else f"我还不能确定你的意图。{HELP_TEXT}"
             response = {
                 "ok": match.intent == Intent.HELP,
@@ -164,14 +343,15 @@ class AgentService:
             session_id,
             "assistant",
             str(response["reply"]),
-            intent=match.intent.value,
+            intent=str(response.get("intent") or match.intent.value),
             tool_name=str(response.get("tool_name") or ""),
             metadata={
                 "ok": bool(response.get("ok")),
                 "data": response.get("data") or {},
                 "requires_attachment": bool(response.get("requires_attachment")),
-                "recognizer_source": match.source,
-                "recognition_metadata": match.metadata,
+                "recognizer_source": str(response.get("recognizer_source") or match.source),
+                "recognition_metadata": response.get("recognition_metadata")
+                or match.metadata,
             },
         )
         return response
@@ -185,10 +365,14 @@ def create_default_service(
     *,
     model_recognizer: Optional[IntentRecognizer] = None,
     recognition_mode: RecognitionMode | str = RecognitionMode.HYBRID,
+    skill_planner: Optional[SkillPlanner] = None,
+    skill_planner_mode: str = "hybrid",
 ) -> AgentService:
     store = SQLiteHistoryStore(db_path or OUTPUTS_DIR / "agent_history.sqlite3")
     return AgentService(
         store,
         model_recognizer=model_recognizer,
         recognition_mode=recognition_mode,
+        skill_planner=skill_planner,
+        skill_planner_mode=skill_planner_mode,
     )
