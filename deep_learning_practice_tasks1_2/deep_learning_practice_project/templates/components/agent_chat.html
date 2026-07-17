@@ -1,6 +1,7 @@
 <section
   class="agent-chat"
   data-agent-chat
+  data-mode="agent"
   data-endpoint="/api/agent/chat"
   data-history-endpoint="/api/agent/history"
   aria-labelledby="agentChatTitle"
@@ -8,15 +9,14 @@
   <header class="agent-chat__header">
     <div>
       <h2 id="agentChatTitle">智能巡检助手</h2>
-      <p>用自然语言调用图片/视频检测、历史查询、风险报告与报警控制。</p>
+      <p>理解巡检目标，调用检测、风险研判、历史查询和报警控制能力。</p>
     </div>
     <span class="agent-chat__status" data-agent-status>待命</span>
   </header>
 
   <div class="agent-chat__messages" data-agent-messages aria-live="polite">
-    <article class="agent-chat__message agent-chat__message--assistant">
-      <span>助手</span>
-      <p>可以上传图片或视频，然后说“检测这张图片”或“检测这段视频”。</p>
+    <article class="agent-chat__message agent-chat__message--assistant" aria-label="智能体消息">
+      <p>我已待命。你可以上传现场图片或视频，也可以直接查询风险、报告和历史记录。</p>
     </article>
   </div>
 

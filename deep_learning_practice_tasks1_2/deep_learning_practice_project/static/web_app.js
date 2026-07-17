@@ -1,398 +1,451 @@
-const form = document.getElementById("pipelineForm");
-const runButton = document.getElementById("runButton");
+const navItems = document.querySelectorAll(".nav-item[data-view]");
+const appViews = document.querySelectorAll(".app-view");
 const statusBadge = document.getElementById("statusBadge");
-const imageInput = document.getElementById("imageInput");
-const previewImage = document.getElementById("previewImage");
-const commandHint = document.getElementById("commandHint");
-const commandSummary = document.getElementById("commandSummary");
-const detectionSummary = document.getElementById("detectionSummary");
-const alarmSummary = document.getElementById("alarmSummary");
-const commandJson = document.getElementById("commandJson");
-const detectionJson = document.getElementById("detectionJson");
-const alarmReport = document.getElementById("alarmReport");
-const resultImage = document.getElementById("resultImage");
-const imagePlaceholder = document.getElementById("imagePlaceholder");
-const imagePath = document.getElementById("imagePath");
-const alarmPath = document.getElementById("alarmPath");
-const progressFill = document.getElementById("progressFill");
-const progressText = document.getElementById("progressText");
-const progressPercent = document.getElementById("progressPercent");
-const modeTabs = document.querySelectorAll(".mode-tab");
-const modePanels = document.querySelectorAll(".mode-panel");
-const videoForm = document.getElementById("videoForm");
-const videoInput = document.getElementById("videoInput");
-const videoPreview = document.getElementById("videoPreview");
-const videoFileHint = document.getElementById("videoFileHint");
-const videoStartTime = document.getElementById("videoStartTime");
-const videoRunButton = document.getElementById("videoRunButton");
-const videoProgressFill = document.getElementById("videoProgressFill");
-const videoProgressText = document.getElementById("videoProgressText");
-const videoProgressPercent = document.getElementById("videoProgressPercent");
-const videoEventCount = document.getElementById("videoEventCount");
-const videoUniqueObjects = document.getElementById("videoUniqueObjects");
-const videoPositiveFrames = document.getElementById("videoPositiveFrames");
-const videoCandidateFrames = document.getElementById("videoCandidateFrames");
-const videoSampledFrames = document.getElementById("videoSampledFrames");
-const videoOverallRisk = document.getElementById("videoOverallRisk");
-const videoClassSummary = document.getElementById("videoClassSummary");
-const videoResultMessage = document.getElementById("videoResultMessage");
-const videoEventRows = document.getElementById("videoEventRows");
-const videoGallery = document.getElementById("videoGallery");
-const videoResultPath = document.getElementById("videoResultPath");
-const videoAlarmPath = document.getElementById("videoAlarmPath");
-const videoAlarmReport = document.getElementById("videoAlarmReport");
+const agentDrawer = document.getElementById("agentDrawer");
+const agentHomeMount = document.getElementById("agentHomeMount");
+const historySourceFilter = document.getElementById("historySourceFilter");
+const historyRiskFilter = document.getElementById("historyRiskFilter");
 
-let progressTimer = null;
-let videoProgressTimer = null;
-let videoPreviewUrl = null;
-
-function setProgress(percent, text, isError = false) {
-  const value = Math.max(0, Math.min(100, Math.round(percent)));
-  progressFill.style.width = `${value}%`;
-  progressFill.classList.toggle("error", isError);
-  progressText.textContent = text;
-  progressPercent.textContent = `${value}%`;
-}
-
-function stopProgressTimer() {
-  if (progressTimer !== null) {
-    clearInterval(progressTimer);
-    progressTimer = null;
-  }
-}
-
-function startSlowProgress(start, limit, text) {
-  stopProgressTimer();
-  setProgress(start, text);
-  let current = start;
-  progressTimer = setInterval(() => {
-    if (current < limit) {
-      current += current < 60 ? 2 : 1;
-      setProgress(Math.min(current, limit), text);
-    }
-  }, 900);
-}
+const HISTORY_STORAGE_KEY = "belt-guard-front-history-v2";
+const RISK_NAMES = { none: "无报警", low: "低风险", medium: "中风险", high: "高风险" };
+const VIEW_NAMES = new Set(["dashboard", "alarms", "history"]);
 
 function setStatus(text, state = "") {
-  statusBadge.textContent = text;
-  statusBadge.className = `status-badge ${state}`.trim();
+  statusBadge.replaceChildren();
+  const dot = document.createElement("span");
+  statusBadge.append(dot, document.createTextNode(text));
+  statusBadge.className = `status-badge status-badge--sidebar ${state}`.trim();
 }
 
-function setBusy(isBusy, text = "运行中") {
-  runButton.disabled = isBusy;
-  document.querySelectorAll("input[name='command']").forEach((input) => {
-    input.disabled = isBusy;
+function openView(viewName) {
+  const view = VIEW_NAMES.has(viewName) ? viewName : "dashboard";
+  navItems.forEach((item) => {
+    const active = item.dataset.view === view;
+    item.classList.toggle("active", active);
+    if (active) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
   });
-  setStatus(isBusy ? text : "就绪", isBusy ? "running" : "");
+  appViews.forEach((item) => item.classList.toggle("active", item.id === `${view}View`));
+  if (view === "dashboard") dockAgentHome();
+  else undockAgentHome();
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function showError(message) {
-  stopProgressTimer();
-  setProgress(100, "运行失败", true);
-  setStatus("出错", "error");
-  alarmSummary.textContent = "流程失败";
-  alarmReport.textContent = message;
+function dockAgentHome() {
+  if (!agentHomeMount || agentDrawer.classList.contains("is-docked")) return;
+  document.body.classList.remove("agent-drawer-open");
+  agentDrawer.classList.add("is-docked");
+  agentDrawer.setAttribute("aria-hidden", "false");
+  agentHomeMount.append(agentDrawer);
 }
 
-function prettyJson(data) {
-  return JSON.stringify(data || {}, null, 2);
+function undockAgentHome() {
+  if (!agentDrawer.classList.contains("is-docked")) return;
+  agentDrawer.classList.remove("is-docked");
+  agentDrawer.setAttribute("aria-hidden", "true");
+  document.body.append(agentDrawer);
+}
+
+function openAgent(prompt = "") {
+  if (agentDrawer.classList.contains("is-docked")) {
+    if (prompt) document.dispatchEvent(new CustomEvent("agent:prefill", { detail: { prompt } }));
+    else agentDrawer.querySelector("textarea[name='message']")?.focus();
+    return;
+  }
+  document.body.classList.add("agent-drawer-open");
+  agentDrawer.setAttribute("aria-hidden", "false");
+  if (prompt) document.dispatchEvent(new CustomEvent("agent:prefill", { detail: { prompt } }));
+  else agentDrawer.querySelector("textarea[name='message']")?.focus();
+}
+
+function closeAgent() {
+  if (agentDrawer.classList.contains("is-docked")) return;
+  document.body.classList.remove("agent-drawer-open");
+  agentDrawer.setAttribute("aria-hidden", "true");
+}
+
+navItems.forEach((item) => item.addEventListener("click", () => openView(item.dataset.view)));
+
+document.querySelectorAll("[data-view-target]").forEach((button) => {
+  button.addEventListener("click", () => {
+    openView(button.dataset.viewTarget);
+    if (button.dataset.agentPrompt) openAgent(button.dataset.agentPrompt);
+  });
+});
+
+document.querySelectorAll("[data-open-agent]").forEach((button) => {
+  button.addEventListener("click", () => openAgent(button.dataset.agentPrompt || ""));
+});
+
+document.querySelectorAll("[data-close-agent]").forEach((button) => button.addEventListener("click", closeAgent));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.body.classList.contains("agent-drawer-open")) closeAgent();
+});
+
+function setAgentPhase(index, label, detail = "") {
+  const phases = [...document.querySelectorAll("#agentPhaseTrack span")];
+  phases.forEach((phase, phaseIndex) => {
+    phase.classList.toggle("done", phaseIndex < index);
+    phase.classList.toggle("active", phaseIndex === index);
+  });
+  const labelNode = document.getElementById("agentPhaseLabel");
+  const detailNode = document.getElementById("agentContextText");
+  if (labelNode && label) labelNode.textContent = label;
+  if (detailNode && detail) detailNode.textContent = detail;
+}
+
+document.addEventListener("agent:status", (event) => {
+  const busy = Boolean(event.detail?.busy);
+  const text = event.detail?.text || (busy ? "处理中" : "待命");
+  const triggerStatus = document.getElementById("agentTriggerStatus");
+  if (triggerStatus) triggerStatus.textContent = text;
+  setStatus(text, busy ? "running" : "");
+  if (busy) setAgentPhase(1, text, "智能体正在理解任务并调用所需工具。");
+});
+
+document.addEventListener("agent:response", (event) => {
+  const response = event.detail?.data;
+  if (!response || typeof response !== "object") return;
+  const reply = String(response.reply || "任务已完成。");
+  const payload = response.data && typeof response.data === "object" ? response.data : {};
+  const risk = findNestedRisk(payload);
+  const detectionLike = Boolean(
+    risk
+    || payload.detection_id
+    || payload.source_type
+    || payload.event_count !== undefined
+    || payload.num_events !== undefined
+  );
+
+  if (!detectionLike) {
+    setAgentPhase(2, "任务已完成", reply);
+    return;
+  }
+
+  const record = createAgentRecord(response, payload, risk);
+  saveHistoryRecord(record);
+  setAgentPhase(
+    record.riskLevel === "none" ? 2 : 3,
+    record.riskLevel === "none" ? "分析完成" : "等待人工确认",
+    reply,
+  );
+});
+
+function normalizeRisk(value) {
+  const risk = String(value || "none").toLowerCase();
+  return Object.hasOwn(RISK_NAMES, risk) ? risk : "none";
+}
+
+function findNestedRisk(value) {
+  if (!value || typeof value !== "object") return null;
+  if (value.overall_risk && typeof value.overall_risk === "object") return value.overall_risk;
+  if (value.risk_level) return { level: value.risk_level, reason: value.reason || "" };
+  if (value.alarm && typeof value.alarm === "object") return findNestedRisk(value.alarm);
+  if (Array.isArray(value.steps)) {
+    for (let index = value.steps.length - 1; index >= 0; index -= 1) {
+      const found = findNestedRisk(value.steps[index]?.data);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function extractReport(value) {
+  if (!value || typeof value !== "object") return "";
+  if (typeof value.alarm_report === "string") return value.alarm_report;
+  if (typeof value.report_text === "string") return value.report_text;
+  if (value.alarm) {
+    const nested = extractReport(value.alarm);
+    if (nested) return nested;
+  }
+  if (Array.isArray(value.steps)) {
+    for (let index = value.steps.length - 1; index >= 0; index -= 1) {
+      const nested = extractReport(value.steps[index]?.data);
+      if (nested) return nested;
+    }
+  }
+  return "";
+}
+
+function firstEventFrame(value) {
+  if (!value || typeof value !== "object") return "";
+  const frame = Array.isArray(value.event_frames) ? value.event_frames[0] : null;
+  if (frame?.key_frame) return outputPathToUrl(frame.key_frame);
+  const event = Array.isArray(value.events) ? value.events[0] : null;
+  const eventFrame = event?.key_frames?.[0]?.image_url || event?.key_frame_url;
+  if (eventFrame) return eventFrame;
+  if (value.alarm) {
+    const nested = firstEventFrame(value.alarm);
+    if (nested) return nested;
+  }
+  if (Array.isArray(value.steps)) {
+    for (let index = value.steps.length - 1; index >= 0; index -= 1) {
+      const nested = firstEventFrame(value.steps[index]?.data);
+      if (nested) return nested;
+    }
+  }
+  return "";
+}
+
+function outputPathToUrl(path) {
+  const normalized = String(path || "").replaceAll("\\", "/");
+  if (/^https?:\/\//i.test(normalized) || normalized.startsWith("/outputs/")) return normalized;
+  const marker = "/outputs/";
+  const markerIndex = normalized.toLowerCase().lastIndexOf(marker);
+  const relative = markerIndex >= 0
+    ? normalized.slice(markerIndex + marker.length)
+    : normalized.replace(/^outputs\//i, "");
+  return `/outputs/${relative.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 function formatClassCounts(classCounts) {
-  if (!classCounts || Object.keys(classCounts).length === 0) {
-    return "未检测到具体类型";
+  if (!classCounts || typeof classCounts !== "object" || Object.keys(classCounts).length === 0) return "未识别具体类型";
+  return Object.entries(classCounts).map(([name, count]) => `${name} ${count}`).join("，");
+}
+
+function createAgentRecord(response, payload, risk) {
+  const level = normalizeRisk(risk?.level || payload.risk_level);
+  const sourceType = String(payload.source_type || payload.source?.type || "agent").toLowerCase();
+  const sourcePath = String(payload.source_path || payload.source?.path || "");
+  const sourceName = sourcePath.split(/[\\/]/).pop() || (sourceType === "video" ? "视频巡检" : sourceType === "image" ? "图片检测" : "智能体任务");
+  const eventCount = Number(payload.event_count ?? payload.num_events ?? payload.detection_count ?? 0);
+  const classes = payload.class_counts || payload.detection_summary?.class_counts || {};
+  const alarmStatus = String(payload.alarm_status || "").toLowerCase();
+  return {
+    id: String(payload.detection_id || `agent-${Date.now()}`),
+    createdAt: String(payload.created_at || new Date().toISOString()),
+    sourceType: ["image", "video"].includes(sourceType) ? sourceType : "agent",
+    sourceName,
+    riskLevel: level,
+    eventCount,
+    classSummary: formatClassCounts(classes),
+    summary: String(response.reply || `${eventCount} 个事件`),
+    report: extractReport(payload) || String(response.reply || ""),
+    imageUrl: firstEventFrame(payload),
+    actionStatus: alarmStatus || (level === "none" ? "inactive" : "pending"),
+    reason: String(risk?.reason || payload.reason || response.reply || ""),
+  };
+}
+
+function loadHistoryRecords() {
+  try {
+    const current = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || "[]");
+    if (Array.isArray(current)) return current;
+  } catch (_error) {
+    // Continue with an empty local view when storage is unavailable.
   }
-  return Object.entries(classCounts)
-    .map(([name, count]) => `${name} ${count}`)
-    .join("，");
+  return [];
 }
 
-function updateCommand(command) {
-  const cmd = command?.command || "未知";
-  const meaning = command?.meaning || "";
-  const confidence = command?.confidence ?? "";
-  commandSummary.textContent = confidence === ""
-    ? `${cmd} / ${meaning}`
-    : `${cmd} / ${meaning} / 置信度 ${confidence}`;
-  commandJson.textContent = prettyJson(command);
+function writeHistoryRecords(records) {
+  try {
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(records.slice(0, 40)));
+  } catch (_error) {
+    // Conversation and detection remain available without local history.
+  }
 }
 
-function updateResult(data) {
-  stopProgressTimer();
-  setProgress(100, "流程完成");
-  updateCommand(data.command);
+function saveHistoryRecord(record) {
+  const records = loadHistoryRecords().filter((item) => item.id !== record.id);
+  records.unshift(record);
+  writeHistoryRecords(records);
+  renderAll(records);
+}
 
-  const detection = data.detection || {};
-  const hasForeignObject = detection.has_foreign_object ?? detection.has_yiwu;
-  const classSummary = formatClassCounts(detection.class_counts);
-  const candidateCount = detection.num_candidates || 0;
-  const ignoredCount = detection.num_ignored || 0;
-  detectionSummary.textContent = `${detection.num_images || 0} 张图片，${detection.num_detections || 0} 个确认目标，${candidateCount} 个待确认，过滤 ${ignoredCount} 个重复/背景框，异物：${Boolean(hasForeignObject)}，类型：${classSummary}`;
-  detectionJson.textContent = prettyJson(detection);
+function latestAlarmRecord(records = loadHistoryRecords()) {
+  return records.find((record) => record.riskLevel !== "none" && record.actionStatus === "pending")
+    || records.find((record) => record.riskLevel !== "none")
+    || null;
+}
 
-  const riskLevelNames = { none: "无报警", low: "低风险", medium: "中风险", high: "高风险" };
-  const overallRisk = data.alarm?.overall_risk || {};
-  alarmSummary.textContent = data.alarm_report
-    ? `规则报告已生成 · ${riskLevelNames[overallRisk.level] || overallRisk.level || "待评估"}`
-    : "未生成报警报告";
-  alarmReport.textContent = data.alarm_report || "无报警报告内容";
-  alarmPath.textContent = data.paths?.alarm_report || "";
-  imagePath.textContent = data.paths?.visualization_image || "";
+function formatRecordTime(value, includeDate = true) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: includeDate ? "2-digit" : undefined,
+    day: includeDate ? "2-digit" : undefined,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
 
-  if (data.image_url) {
-    resultImage.src = `${data.image_url}?t=${Date.now()}`;
-    resultImage.style.display = "block";
-    imagePlaceholder.style.display = "none";
+function riskClass(level) {
+  return `risk-badge risk-${normalizeRisk(level)}`;
+}
+
+function actionStatusName(status) {
+  return { inactive: "无需报警", pending: "待确认", confirmed: "已确认", cancelled: "已取消" }[status] || "待复核";
+}
+
+function renderDashboard(records) {
+  const today = new Date().toDateString();
+  const todayRecords = records.filter((record) => new Date(record.createdAt).toDateString() === today);
+  const pending = records.filter((record) => record.riskLevel !== "none" && record.actionStatus === "pending");
+  document.getElementById("todayRunCount").textContent = String(todayRecords.length);
+  document.getElementById("todayHighRiskCount").textContent = String(todayRecords.filter((record) => record.riskLevel === "high").length);
+  document.getElementById("pendingAlarmCount").textContent = String(pending.length);
+  document.getElementById("sidebarAlarmCount").textContent = String(pending.length);
+  document.getElementById("dashboardAlertCount").textContent = `${pending.length} 项`;
+  document.getElementById("latestRiskLabel").textContent = records[0] ? RISK_NAMES[records[0].riskLevel] : "安全";
+
+  const alertEmpty = document.getElementById("dashboardAlertEmpty");
+  const alertContent = document.getElementById("dashboardAlertContent");
+  alertEmpty.hidden = pending.length > 0;
+  alertContent.hidden = pending.length === 0;
+  if (pending.length > 0) {
+    const alert = pending[0];
+    const badge = document.getElementById("dashboardAlertRisk");
+    badge.textContent = RISK_NAMES[alert.riskLevel];
+    badge.className = riskClass(alert.riskLevel);
+    document.getElementById("dashboardAlertTime").textContent = formatRecordTime(alert.createdAt, false);
+    document.getElementById("dashboardAlertTitle").textContent = alert.sourceName;
+    document.getElementById("dashboardAlertReason").textContent = alert.reason || alert.summary;
+  }
+
+  const list = document.getElementById("dashboardRecentList");
+  list.replaceChildren();
+  if (records.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "console-empty";
+    empty.textContent = "完成对话任务后自动生成记录";
+    list.append(empty);
+    return;
+  }
+  records.slice(0, 3).forEach((record) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "console-recent-item";
+    item.addEventListener("click", () => openView("history"));
+    const copy = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = record.sourceName;
+    const subtitle = document.createElement("small");
+    subtitle.textContent = `${RISK_NAMES[record.riskLevel]} · ${record.eventCount} 个事件`;
+    copy.append(title, subtitle);
+    const time = document.createElement("time");
+    time.textContent = formatRecordTime(record.createdAt, false);
+    item.append(copy, time);
+    list.append(item);
+  });
+}
+
+function renderAlarmCenter(record) {
+  const empty = document.getElementById("alarmCenterEmpty");
+  const content = document.getElementById("alarmCenterContent");
+  empty.hidden = Boolean(record);
+  content.hidden = !record;
+  if (!record) return;
+
+  document.getElementById("alarmCenterTitle").textContent = record.sourceName;
+  document.getElementById("alarmCenterSummary").textContent = record.reason || record.summary;
+  const badge = document.getElementById("alarmCenterRisk");
+  badge.textContent = RISK_NAMES[record.riskLevel];
+  badge.className = riskClass(record.riskLevel);
+  document.getElementById("alarmCenterSource").textContent = record.sourceType === "video" ? "视频巡检" : record.sourceType === "image" ? "图片检测" : "智能体任务";
+  document.getElementById("alarmCenterEvents").textContent = String(record.eventCount || 0);
+  document.getElementById("alarmCenterTime").textContent = formatRecordTime(record.createdAt);
+  document.getElementById("alarmCenterStatus").textContent = actionStatusName(record.actionStatus);
+  document.getElementById("alarmCenterReport").textContent = record.report || "暂无详细风险报告。";
+
+  const image = document.getElementById("alarmCenterImage");
+  const imageEmpty = document.getElementById("alarmCenterImageEmpty");
+  if (record.imageUrl) {
+    image.src = record.imageUrl;
+    image.style.display = "block";
+    imageEmpty.style.display = "none";
   } else {
-    resultImage.removeAttribute("src");
-    resultImage.style.display = "none";
-    imagePlaceholder.style.display = "block";
-    imagePlaceholder.textContent = "当前命令未启动检测，或没有生成可视化图片";
+    image.removeAttribute("src");
+    image.style.display = "none";
+    imageEmpty.style.display = "block";
   }
+  const actionable = record.actionStatus === "pending";
+  document.getElementById("confirmAlarmButton").disabled = !actionable;
+  document.getElementById("cancelAlarmButton").disabled = !actionable;
+}
+
+function renderHistory(records = loadHistoryRecords()) {
+  const source = historySourceFilter?.value || "all";
+  const risk = historyRiskFilter?.value || "all";
+  const filtered = records.filter((record) => (
+    (source === "all" || record.sourceType === source)
+    && (risk === "all" || record.riskLevel === risk)
+  ));
+  const rows = document.getElementById("historyRows");
+  const empty = document.getElementById("historyEmpty");
+  rows.replaceChildren();
+  empty.hidden = filtered.length > 0;
+  filtered.forEach((record) => {
+    const row = document.createElement("tr");
+    const values = [
+      [formatRecordTime(record.createdAt), record.id],
+      [record.sourceType === "video" ? "视频巡检" : record.sourceType === "image" ? "图片检测" : "智能体任务", record.sourceName],
+      [record.summary || "检测完成", record.classSummary],
+    ];
+    values.forEach(([primary, secondary]) => {
+      const cell = document.createElement("td");
+      cell.textContent = primary;
+      const small = document.createElement("small");
+      small.textContent = secondary || "";
+      cell.append(small);
+      row.append(cell);
+    });
+    const riskCell = document.createElement("td");
+    const badge = document.createElement("span");
+    badge.className = riskClass(record.riskLevel);
+    badge.textContent = RISK_NAMES[record.riskLevel];
+    riskCell.append(badge);
+    const statusCell = document.createElement("td");
+    statusCell.textContent = actionStatusName(record.actionStatus);
+    const actionCell = document.createElement("td");
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "text-button";
+    action.textContent = "智能体复核";
+    action.addEventListener("click", () => openAgent(`请查询并复核检测记录 ${record.id}`));
+    actionCell.append(action);
+    row.append(riskCell, statusCell, actionCell);
+    rows.append(row);
+  });
+}
+
+function renderAll(records = loadHistoryRecords()) {
+  renderDashboard(records);
+  renderAlarmCenter(latestAlarmRecord(records));
+  renderHistory(records);
 }
 
 async function sendAlarmAction(action) {
   const body = new FormData();
   body.append("action", action);
-
-  setBusy(true, action === "yes" ? "继续报警" : "停止报警");
-  setProgress(action === "yes" ? 85 : 80, action === "yes" ? "正在确认继续报警" : "正在停止报警");
-
+  setStatus(action === "yes" ? "确认报警" : "取消报警", "running");
   try {
     const response = await fetch("/api/alarm_action", { method: "POST", body });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || "报警控制失败");
-    }
-    updateResult(data);
-    commandHint.textContent = data.message;
-    alarmSummary.textContent = data.message;
-    setStatus(action === "yes" ? "继续报警" : "已停止");
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error(data.error || "报警控制失败");
+    const records = loadHistoryRecords();
+    const target = records.find((record) => record.riskLevel !== "none" && record.actionStatus === "pending");
+    if (target) target.actionStatus = action === "yes" ? "confirmed" : "cancelled";
+    writeHistoryRecords(records);
+    renderAll(records);
+    setStatus(action === "yes" ? "已确认" : "已取消");
+    setAgentPhase(3, action === "yes" ? "报警已确认" : "报警已取消", data.message || "报警处置已完成。");
   } catch (error) {
-    showError(error.message);
-  } finally {
-    runButton.disabled = false;
-    document.querySelectorAll("input[name='command']").forEach((input) => {
-      input.disabled = false;
-    });
+    setStatus("处置失败", "error");
+    setAgentPhase(3, "处置失败", error.message);
   }
 }
 
-document.querySelectorAll("input[name='command']").forEach((input) => {
-  input.addEventListener("change", () => {
-    const value = input.value;
-    if (value === "yes" || value === "no") {
-      commandHint.textContent = value === "yes" ? "正在确认并继续当前报警。" : "正在停止当前报警。";
-      sendAlarmAction(value);
-    } else {
-      commandHint.textContent = "当前使用手动控制。";
-    }
-  });
+document.getElementById("confirmAlarmButton")?.addEventListener("click", () => {
+  if (window.confirm("确认继续当前报警？该操作将写入现有报警控制流程。")) sendAlarmAction("yes");
 });
 
-imageInput.addEventListener("change", () => {
-  const file = imageInput.files?.[0];
-  if (!file) {
-    previewImage.style.display = "none";
-    return;
-  }
-  previewImage.src = URL.createObjectURL(file);
-  previewImage.style.display = "block";
+document.getElementById("cancelAlarmButton")?.addEventListener("click", () => {
+  if (window.confirm("确认取消当前报警？请仅在误报或风险已解除时操作。")) sendAlarmAction("no");
 });
 
-async function runPipeline() {
-  if (!imageInput.files || imageInput.files.length === 0) {
-    showError("请先选择需要检测的图片。");
-    return;
-  }
+historySourceFilter?.addEventListener("change", () => renderHistory());
+historyRiskFilter?.addEventListener("change", () => renderHistory());
 
-  const body = new FormData(form);
-
-  setBusy(true, "流程运行中");
-  startSlowProgress(15, 92, "正在运行完整流程");
-  commandSummary.textContent = "正在处理命令...";
-  detectionSummary.textContent = "正在执行 YOLO 检测...";
-  alarmSummary.textContent = "等待规则引擎评估...";
-
-  try {
-    const response = await fetch("/api/run", { method: "POST", body });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || "流程运行失败");
-    }
-    updateResult(data);
-    setStatus("完成");
-  } catch (error) {
-    showError(error.message);
-  } finally {
-    runButton.disabled = false;
-    document.querySelectorAll("input[name='command']").forEach((input) => {
-      input.disabled = false;
-    });
-  }
-}
-
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  await runPipeline();
-});
-
-modeTabs.forEach((tab) => {
-  tab.addEventListener("click", () => {
-    const selectedMode = tab.dataset.mode;
-    modeTabs.forEach((item) => item.classList.toggle("active", item === tab));
-    modePanels.forEach((panel) => {
-      panel.classList.toggle("active", panel.id === `${selectedMode}Mode`);
-    });
-  });
-});
-
-function setVideoProgress(percent, text, isError = false) {
-  const value = Math.max(0, Math.min(100, Math.round(percent)));
-  videoProgressFill.style.width = `${value}%`;
-  videoProgressFill.classList.toggle("error", isError);
-  videoProgressText.textContent = text;
-  videoProgressPercent.textContent = `${value}%`;
-}
-
-function stopVideoProgress() {
-  if (videoProgressTimer !== null) {
-    clearInterval(videoProgressTimer);
-    videoProgressTimer = null;
-  }
-}
-
-function startVideoProgress() {
-  stopVideoProgress();
-  let current = 8;
-  setVideoProgress(current, "正在上传视频并逐帧检测");
-  videoProgressTimer = setInterval(() => {
-    current = Math.min(94, current + (current < 60 ? 2 : 1));
-    setVideoProgress(current, "正在上传视频并逐帧检测");
-  }, 1000);
-}
-
-function appendCell(row, text) {
-  const cell = document.createElement("td");
-  cell.textContent = text;
-  row.appendChild(cell);
-}
-
-function updateVideoResult(data) {
-  stopVideoProgress();
-  setVideoProgress(100, "视频检测完成");
-  videoEventCount.textContent = String(data.num_events || 0);
-  videoUniqueObjects.textContent = String(data.unique_object_count || 0);
-  videoPositiveFrames.textContent = String(data.positive_frames || 0);
-  videoCandidateFrames.textContent = String(data.candidate_frames || 0);
-  videoSampledFrames.textContent = String(data.sampled_frames || 0);
-  const videoRiskNames = { none: "无报警", low: "低风险", medium: "中风险", high: "高风险" };
-  videoOverallRisk.textContent = videoRiskNames[data.overall_risk?.level] || data.overall_risk?.level || "待评估";
-  videoClassSummary.textContent = formatClassCounts(data.class_counts).replaceAll("，", " / ");
-  videoResultPath.textContent = data.result_json || "";
-  videoAlarmPath.textContent = data.alarm_report_path || "";
-  videoAlarmReport.textContent = data.alarm_report || "没有生成视频报警报告";
-  videoEventRows.replaceChildren();
-  videoGallery.replaceChildren();
-
-  if (!data.has_foreign_object) {
-    videoResultMessage.className = "video-result-message no-detection";
-    videoResultMessage.textContent = `检测完成：共按 ${data.sample_fps} FPS 检测 ${data.sampled_frames} 帧，没有确认异物。保留 ${data.candidate_frames || 0} 张候选调试帧，候选不会触发报警。`;
-    const placeholder = document.createElement("div");
-    placeholder.className = "gallery-placeholder";
-    placeholder.textContent = "本次没有检测到异物，因此没有保存图片";
-    videoGallery.appendChild(placeholder);
-    return;
-  }
-
-  videoResultMessage.className = "video-result-message";
-  videoResultMessage.textContent = `检测到 ${data.num_events} 个异物时间段、${data.unique_object_count} 个跟踪独立目标；共保存 ${data.saved_images} 张原始命中或候选调试帧，其中 ${data.positive_frames} 张包含确认目标。`;
-
-  data.events.forEach((event) => {
-    const row = document.createElement("tr");
-    appendCell(row, String(event.event_id));
-    appendCell(row, `${event.start_video_time} 至 ${event.end_video_time}`);
-    appendCell(row, `${event.start_real_time} 至 ${event.end_real_time}`);
-    appendCell(row, String(event.max_simultaneous_objects ?? event.object_count ?? 0));
-    appendCell(row, String(event.unique_object_count ?? event.object_count ?? 0));
-    appendCell(row, String(event.positive_sample_count || 0));
-    appendCell(row, formatClassCounts(event.class_counts));
-    appendCell(row, Number(event.max_confidence).toFixed(2));
-    appendCell(row, String(event.key_frames?.length || (event.key_frame_url ? 1 : 0)));
-    videoEventRows.appendChild(row);
-
-    const keyFrames = event.key_frames?.length
-      ? event.key_frames
-      : [{ image_url: event.key_frame_url, track_ids: event.track_ids || [], class_counts: event.class_counts }];
-    keyFrames.forEach((keyFrame, frameIndex) => {
-      if (!keyFrame.image_url) return;
-      const figure = document.createElement("figure");
-      const image = document.createElement("img");
-      image.src = `${keyFrame.image_url}?t=${Date.now()}`;
-      image.alt = `异物事件 ${event.event_id} 代表帧 ${frameIndex + 1}`;
-      const caption = document.createElement("figcaption");
-      const trackText = keyFrame.track_ids?.length ? `轨迹 ${keyFrame.track_ids.join(", ")}` : "轨迹未记录";
-      caption.textContent = `事件 ${event.event_id} · 代表帧 ${frameIndex + 1} · ${keyFrame.video_time || event.start_video_time} · ${trackText} · ${formatClassCounts(keyFrame.class_counts || event.class_counts)}`;
-      figure.append(image, caption);
-      videoGallery.appendChild(figure);
-    });
-  });
-}
-
-function showVideoError(message) {
-  stopVideoProgress();
-  setVideoProgress(100, "视频检测失败", true);
-  videoResultMessage.className = "video-result-message no-detection";
-  videoResultMessage.textContent = message;
-  setStatus("出错", "error");
-}
-
-const localNow = new Date();
-localNow.setMinutes(localNow.getMinutes() - localNow.getTimezoneOffset());
-videoStartTime.value = localNow.toISOString().slice(0, 19);
-
-videoInput.addEventListener("change", () => {
-  const file = videoInput.files?.[0];
-  if (videoPreviewUrl) {
-    URL.revokeObjectURL(videoPreviewUrl);
-    videoPreviewUrl = null;
-  }
-  if (!file) {
-    videoPreview.style.display = "none";
-    videoFileHint.textContent = "上传后只保存检测到异物的带框图片。";
-    return;
-  }
-  videoPreviewUrl = URL.createObjectURL(file);
-  videoPreview.src = videoPreviewUrl;
-  videoPreview.style.display = "block";
-  videoFileHint.textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB`;
-});
-
-videoForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!videoInput.files || videoInput.files.length === 0) {
-    showVideoError("请先选择需要检测的视频。");
-    return;
-  }
-
-  const body = new FormData(videoForm);
-  videoRunButton.disabled = true;
-  setStatus("视频检测中", "running");
-  videoResultMessage.className = "video-result-message";
-  videoResultMessage.textContent = "视频较长时需要等待，检测过程中页面请保持打开。";
-  startVideoProgress();
-
-  try {
-    const response = await fetch("/api/video-detect", { method: "POST", body });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || "视频检测失败");
-    }
-    updateVideoResult(data.video_detection);
-    setStatus("完成");
-  } catch (error) {
-    showVideoError(error.message);
-  } finally {
-    videoRunButton.disabled = false;
-  }
-});
+dockAgentHome();
+renderAll();

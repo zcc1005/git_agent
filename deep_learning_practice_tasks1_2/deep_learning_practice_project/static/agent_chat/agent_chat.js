@@ -1,12 +1,10 @@
 function createMessage(role, text, isError = false, attachment = null) {
   const article = document.createElement("article");
   article.className = `agent-chat__message agent-chat__message--${role}`;
+  article.setAttribute("aria-label", role === "user" ? "你的消息" : "智能体消息");
   if (isError) article.classList.add("agent-chat__message--error");
   if (attachment?.src) article.classList.add("agent-chat__message--media");
 
-  const label = document.createElement("span");
-  label.textContent = role === "user" ? "你" : "助手";
-  article.append(label);
   if (text) {
     const content = document.createElement("p");
     content.textContent = text;
@@ -216,6 +214,9 @@ export function mountAgentChat(root) {
     sendButton.disabled = busy;
     status.textContent = busy ? busyText : "待命";
     status.classList.toggle("is-busy", busy);
+    document.dispatchEvent(new CustomEvent("agent:status", {
+      detail: { busy, text: busy ? busyText : "待命" },
+    }));
   }
 
   async function loadHistory() {
@@ -297,6 +298,7 @@ export function mountAgentChat(root) {
         !data.ok,
       );
       appendAlarmReport(assistantArticle, extractAlarmReport(data.data));
+      document.dispatchEvent(new CustomEvent("agent:response", { detail: { data } }));
       if (data.attachment_received) {
         mediaInput.value = "";
         fileLabel.textContent = "";
@@ -340,6 +342,14 @@ export function mountAgentChat(root) {
       textarea.value = button.dataset.agentPrompt || "";
       textarea.focus();
     });
+  });
+
+  document.addEventListener("agent:prefill", (event) => {
+    const prompt = String(event.detail?.prompt || "").trim();
+    if (!prompt) return;
+    textarea.value = prompt;
+    textarea.dispatchEvent(new Event("input"));
+    textarea.focus();
   });
 
   loadHistory();

@@ -3,287 +3,136 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>工业皮带异物检测与智能报警系统</title>
+  <title>工业传输带异物巡检智能体</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='web_app.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='agent_chat/agent_chat.css') }}">
 </head>
 <body>
-  <main class="app-shell">
-    <header class="topbar">
-      <div>
-        <h1>工业皮带异物检测与智能报警系统</h1>
-        <p>手动检测控制 · YOLO 异物检测 · 统一结构与规则报警</p>
+  <div class="app-layout">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand">
+        <span class="brand__eyebrow">BELT GUARD</span>
+        <strong>异物巡检智能体</strong>
+        <span>工业传输带安全工作台</span>
       </div>
-      <div id="statusBadge" class="status-badge">就绪</div>
-    </header>
 
-    <nav class="mode-tabs" aria-label="检测模式">
-      <button type="button" class="mode-tab active" data-mode="image">图片检测</button>
-      <button type="button" class="mode-tab" data-mode="video">视频检测</button>
-      <button type="button" class="mode-tab" data-mode="agent">智能助手</button>
-    </nav>
+      <nav class="primary-nav">
+        <button type="button" class="nav-item active" data-view="dashboard" aria-current="page">
+          <span>01</span><strong>智能体工作台</strong>
+        </button>
+        <button type="button" class="nav-item" data-view="alarms">
+          <span>02</span><strong>报警中心</strong><em id="sidebarAlarmCount">0</em>
+        </button>
+        <button type="button" class="nav-item" data-view="history">
+          <span>03</span><strong>历史复核</strong>
+        </button>
+      </nav>
 
-    <section id="imageMode" class="workspace mode-panel active">
-      <form id="pipelineForm" class="control-panel">
-        <div class="section-title">检测与报警控制</div>
-        <div class="segmented" role="radiogroup" aria-label="手动命令">
-          <label><input type="radio" name="command" value="go" checked><span>go</span></label>
-          <label><input type="radio" name="command" value="stop"><span>stop</span></label>
-          <label><input type="radio" name="command" value="yes"><span>yes</span></label>
-          <label><input type="radio" name="command" value="no"><span>no</span></label>
-        </div>
+      <div class="sidebar-status">
+        <div id="statusBadge" class="status-badge status-badge--sidebar"><span></span>就绪</div>
+        <span>智能体服务在线 · YOLO · 规则引擎</span>
+      </div>
+    </aside>
 
-        <div id="commandHint" class="hint">当前使用手动控制；自然语言智能体入口将在后续阶段接入。</div>
-
-        <div class="section-title">选择图片</div>
-        <label class="file-picker">
-          <input id="imageInput" name="image" type="file" accept="image/*" required>
-          <span>选择需要检测的图片</span>
-        </label>
-        <img id="previewImage" class="preview-image" alt="待检测图片预览">
-
-        <div class="param-grid">
-          <label>
-            <span>YOLO 最低置信度</span>
-            <input id="confInput" name="conf" type="number" min="0.01" max="0.39" step="0.01" value="0.25">
-          </label>
-        </div>
-
-        <details class="advanced-options">
-          <summary>图片后处理参数</summary>
-          <div class="video-param-grid">
-            <label>
-              <span>类别确认阈值</span>
-              <input name="known_conf" type="number" min="0.02" max="1" step="0.01" value="0.40">
-            </label>
-            <label>
-              <span>推理尺寸 imgsz</span>
-              <input name="imgsz" type="number" min="320" max="1920" step="32" value="800">
-            </label>
-            <label>
-              <span>YOLO NMS IoU</span>
-              <input name="nms_iou" type="number" min="0.05" max="0.95" step="0.05" value="0.40">
-            </label>
-            <label>
-              <span>二次重复框 IoU</span>
-              <input name="duplicate_iou" type="number" min="0.05" max="0.95" step="0.05" value="0.45">
-            </label>
-            <label>
-              <span>最大检测框面积比例</span>
-              <input name="max_area_ratio" type="number" min="0.10" max="0.95" step="0.05" value="0.65">
-            </label>
-          </div>
-          <div class="hint">低于类别确认阈值的框只显示为待确认候选，不触发报警。</div>
-        </details>
-
-        <button id="runButton" type="submit" class="primary-button">运行完整流程</button>
-      </form>
-
-      <section class="result-panel">
-        <div class="section-title">流程状态</div>
-        <div class="step-grid">
-          <div class="step-card">
-            <strong>控制</strong>
-            <span id="commandSummary">等待命令</span>
-          </div>
-          <div class="step-card">
-            <strong>检测</strong>
-            <span id="detectionSummary">等待检测</span>
-          </div>
-          <div class="step-card">
-            <strong>报警</strong>
-            <span id="alarmSummary">等待报告</span>
-          </div>
-        </div>
-
-        <div class="progress-wrap" aria-label="运行进度">
-          <div class="progress-track">
-            <div id="progressFill" class="progress-fill"></div>
-          </div>
-          <div class="progress-labels">
-            <span id="progressText">等待运行</span>
-            <span id="progressPercent">0%</span>
-          </div>
-        </div>
-
-        <div class="output-grid">
-          <section class="output-block">
-            <div class="block-head">
-              <h2>检测框图</h2>
-              <span id="imagePath"></span>
+    <div class="page-shell">
+      <main class="main-content main-content--console">
+        <section id="dashboardView" class="app-view active console-view" aria-labelledby="dashboardTitle">
+          <header class="console-heading">
+            <div><h2 id="dashboardTitle">直接告诉智能体你要做什么</h2><p>输入命令或上传图片、视频，智能体会自动调用检测、研判、报警和历史工具。</p></div>
+            <div class="console-heading__prompts">
+              <button type="button" data-open-agent data-agent-prompt="检测这张图片">检测图片</button>
+              <button type="button" data-open-agent data-agent-prompt="检测这段视频">分析视频</button>
+              <button type="button" data-open-agent data-agent-prompt="生成今日风险报告">生成日报</button>
             </div>
-            <div class="image-frame">
-              <img id="resultImage" alt="检测结果框图">
-              <div id="imagePlaceholder">运行后显示 YOLO 检测框图</div>
-            </div>
+          </header>
+
+          <section class="conversation-layout conversation-layout--console" aria-label="智能体对话控制台">
+            <div id="agentHomeMount" class="agent-home-mount"></div>
+
+            <aside class="agent-context-rail agent-context-rail--console">
+              <article class="console-context-card console-context-card--status">
+                <div class="console-context-head"><span>当前任务</span><strong id="agentPhaseLabel">智能体待命</strong></div>
+                <p id="agentContextText">等待自然语言指令或附件。你不需要先选择检测模式。</p>
+                <div class="phase-track" id="agentPhaseTrack" aria-label="智能体任务进度">
+                  <span class="active">理解</span><span>调用</span><span>研判</span><span>确认</span>
+                </div>
+              </article>
+
+              <article class="console-context-card">
+                <div class="console-context-head"><span>今日运行</span><strong>实时上下文</strong></div>
+                <div class="context-metrics">
+                  <div><strong id="todayRunCount">0</strong><span>检测任务</span></div>
+                  <div><strong id="todayHighRiskCount">0</strong><span>高风险</span></div>
+                  <div><strong id="pendingAlarmCount">0</strong><span>待处置</span></div>
+                  <div><strong id="latestRiskLabel">安全</strong><span>最近风险</span></div>
+                </div>
+              </article>
+
+              <article class="console-context-card console-alert-card">
+                <div class="console-context-head"><span>风险待办</span><strong id="dashboardAlertCount">0 项</strong></div>
+                <div id="dashboardAlertEmpty" class="console-empty">当前没有待确认报警</div>
+                <div id="dashboardAlertContent" class="console-alert" hidden>
+                  <div><span id="dashboardAlertRisk" class="risk-badge risk-none">待评估</span><small id="dashboardAlertTime">—</small></div>
+                  <strong id="dashboardAlertTitle">检测到风险事件</strong>
+                  <p id="dashboardAlertReason">等待规则引擎生成风险说明。</p>
+                  <button type="button" data-view-target="alarms">查看并处置</button>
+                </div>
+              </article>
+
+              <article class="console-context-card console-recent-card">
+                <div class="console-context-head"><span>最近记录</span><button type="button" data-view-target="history">全部</button></div>
+                <div id="dashboardRecentList" class="console-recent-list">
+                  <div class="console-empty">完成对话任务后自动生成记录</div>
+                </div>
+              </article>
+            </aside>
           </section>
-
-          <section class="output-block">
-            <div class="block-head">
-              <h2>报警报告</h2>
-              <span id="alarmPath"></span>
-            </div>
-            <pre id="alarmReport">运行后显示 outputs/alarm_report.txt 内容</pre>
-          </section>
-        </div>
-
-        <section class="json-row">
-          <div>
-            <h2>command.json</h2>
-            <pre id="commandJson">{}</pre>
-          </div>
-          <div>
-            <h2>detection.json 摘要</h2>
-            <pre id="detectionJson">{}</pre>
-          </div>
-        </section>
-      </section>
-    </section>
-
-    <section id="videoMode" class="workspace mode-panel">
-      <form id="videoForm" class="control-panel">
-        <div class="section-title">上传监控视频</div>
-        <label class="file-picker">
-          <input id="videoInput" name="video" type="file" accept="video/*,.avi,.mkv,.flv,.wmv,.mpeg,.mpg" required>
-          <span>选择需要检测的视频</span>
-        </label>
-        <video id="videoPreview" class="video-preview" controls preload="metadata"></video>
-        <div id="videoFileHint" class="hint">上传后只保存检测到异物的带框图片。</div>
-
-        <div class="video-param-grid">
-          <label>
-            <span>视频开始时间</span>
-            <input id="videoStartTime" name="video_start_time" type="datetime-local" step="1" required>
-          </label>
-          <label>
-            <span>每秒检测帧数（FPS）</span>
-            <input id="videoFps" name="fps" type="number" min="0.1" max="60" step="0.1" value="4" required>
-          </label>
-          <label>
-            <span>YOLO 最低置信度</span>
-            <input id="videoConf" name="conf" type="number" min="0.01" max="0.39" step="0.01" value="0.25" required>
-          </label>
-        </div>
-
-        <details class="advanced-options">
-          <summary>高级检测与跟踪参数</summary>
-          <div class="video-param-grid">
-            <label>
-              <span>推理尺寸 imgsz</span>
-              <input name="imgsz" type="number" min="320" max="1920" step="32" value="800">
-            </label>
-            <label>
-              <span>YOLO NMS IoU</span>
-              <input name="nms_iou" type="number" min="0.05" max="0.95" step="0.05" value="0.40">
-            </label>
-            <label>
-              <span>二次重复框 IoU</span>
-              <input name="duplicate_iou" type="number" min="0.05" max="0.95" step="0.05" value="0.45">
-            </label>
-            <label>
-              <span>事件静默切分（秒）</span>
-              <input name="event_silence_seconds" type="number" min="0.1" max="10" step="0.1" value="1.0">
-            </label>
-            <label>
-              <span>轨迹最大失联（秒）</span>
-              <input name="track_max_age_seconds" type="number" min="0" max="10" step="0.1" value="1.0">
-            </label>
-            <label>
-              <span>候选框最少连续命中</span>
-              <input name="min_unknown_hits" type="number" min="1" max="20" step="1" value="2">
-            </label>
-            <label>
-              <span>候选框单帧确认阈值</span>
-              <input name="unknown_single_frame_conf" type="number" min="0.15" max="0.40" step="0.01" value="0.40">
-            </label>
-            <label>
-              <span>轨迹中心距离比例</span>
-              <input name="track_center_distance_ratio" type="number" min="0.1" max="10" step="0.1" value="3.0">
-            </label>
-            <label>
-              <span>跨类别 NMS</span>
-              <select name="agnostic_nms">
-                <option value="false" selected>关闭（推荐）</option>
-                <option value="true">开启</option>
-              </select>
-            </label>
-            <label>
-              <span>ROI（可选 x1,y1,x2,y2）</span>
-              <input name="roi" type="text" placeholder="留空表示检测完整画面">
-            </label>
-          </div>
-        </details>
-
-        <button id="videoRunButton" type="submit" class="primary-button">上传并检测视频</button>
-      </form>
-
-      <section class="result-panel video-result-panel">
-        <div class="section-title">视频检测结果</div>
-        <div class="progress-wrap" aria-label="视频检测进度">
-          <div class="progress-track">
-            <div id="videoProgressFill" class="progress-fill"></div>
-          </div>
-          <div class="progress-labels">
-            <span id="videoProgressText">等待上传视频</span>
-            <span id="videoProgressPercent">0%</span>
-          </div>
-        </div>
-
-        <div class="video-metrics">
-          <div><strong id="videoEventCount">0</strong><span>异物时间段</span></div>
-          <div><strong id="videoUniqueObjects">0</strong><span>跟踪独立异物</span></div>
-          <div><strong id="videoPositiveFrames">0</strong><span>确认命中帧</span></div>
-          <div><strong id="videoCandidateFrames">0</strong><span>候选调试帧</span></div>
-          <div><strong id="videoSampledFrames">0</strong><span>YOLO 检测帧</span></div>
-          <div><strong id="videoOverallRisk">无报警</strong><span>总体风险</span></div>
-          <div><strong id="videoClassSummary">无</strong><span>异物类别</span></div>
-        </div>
-
-        <div id="videoResultMessage" class="video-result-message">检测完成后在这里显示异物出现时间段。</div>
-
-        <div class="event-table-wrap">
-          <table class="event-table">
-            <thead>
-              <tr>
-                <th>序号</th>
-                <th>视频内时间</th>
-                <th>实际时间</th>
-                <th>单帧最大同时数</th>
-                <th>独立异物数</th>
-                <th>确认命中帧</th>
-                <th>类别</th>
-                <th>最高置信度</th>
-                <th>代表帧</th>
-              </tr>
-            </thead>
-            <tbody id="videoEventRows"></tbody>
-          </table>
-        </div>
-
-        <section class="output-block video-alarm-block">
-          <div class="block-head">
-            <h2>视频规则报警报告</h2>
-            <span id="videoAlarmPath"></span>
-          </div>
-          <pre id="videoAlarmReport">视频检测完成后显示规则引擎报告</pre>
         </section>
 
-        <section class="video-gallery-section">
-          <div class="block-head">
-            <h2>各时间段关键帧</h2>
-            <span id="videoResultPath"></span>
+        <section id="alarmsView" class="app-view console-secondary-view" aria-labelledby="alarmsTitle">
+          <header class="view-heading view-heading--compact">
+            <div><span class="view-heading__kicker">ALARM CENTER</span><h2 id="alarmsTitle">报警中心</h2><p>查看风险证据、智能体研判和人工处置状态。</p></div>
+            <button type="button" class="secondary-button" data-open-agent data-agent-prompt="查询当前报警">让智能体查询报警</button>
+          </header>
+          <div id="alarmCenterEmpty" class="large-empty-state">
+            <span>当前安全</span><h3>没有可处置的报警</h3><p>在智能体工作台上传图片或视频并发出检测命令，风险结果会自动汇总到这里。</p><button type="button" class="primary-button compact" data-view-target="dashboard" data-agent-prompt="开始一次异物检测">返回智能体工作台</button>
           </div>
-          <div id="videoGallery" class="video-gallery">
-            <div class="gallery-placeholder">检测到异物后显示带框关键帧</div>
+          <div id="alarmCenterContent" class="alarm-detail-layout" hidden>
+            <article class="alarm-hero">
+              <div class="alarm-hero__top"><div><span>当前报警</span><h3 id="alarmCenterTitle">异物风险事件</h3></div><span id="alarmCenterRisk" class="risk-badge risk-none">待评估</span></div>
+              <p id="alarmCenterSummary">等待检测结果。</p>
+              <div class="alarm-facts"><div><span>来源</span><strong id="alarmCenterSource">—</strong></div><div><span>事件数量</span><strong id="alarmCenterEvents">0</strong></div><div><span>发现时间</span><strong id="alarmCenterTime">—</strong></div><div><span>处置状态</span><strong id="alarmCenterStatus">待确认</strong></div></div>
+              <div class="alarm-actions"><button id="confirmAlarmButton" type="button" class="primary-button compact">确认并继续报警</button><button id="cancelAlarmButton" type="button" class="danger-button">取消报警</button></div>
+            </article>
+            <article class="alarm-evidence dashboard-card"><div class="card-heading"><div><span>视觉证据</span><h3>关键检测帧</h3></div></div><div class="alarm-image-frame"><img id="alarmCenterImage" alt="报警关键检测帧"><div id="alarmCenterImageEmpty">暂无关键帧</div></div></article>
+            <article class="alarm-report dashboard-card"><div class="card-heading"><div><span>智能体研判</span><h3>风险说明与处置建议</h3></div></div><pre id="alarmCenterReport">等待智能体生成风险报告。</pre></article>
           </div>
         </section>
-      </section>
-    </section>
 
-    <section id="agentMode" class="agent-mode-panel mode-panel">
-      {% include "components/agent_chat.html" %}
-    </section>
-  </main>
+        <section id="historyView" class="app-view console-secondary-view" aria-labelledby="historyTitle">
+          <header class="view-heading view-heading--compact">
+            <div><span class="view-heading__kicker">HISTORY & REVIEW</span><h2 id="historyTitle">历史与复核</h2><p>浏览当前设备的检测留痕，并通过智能体查询完整业务记录。</p></div>
+            <button type="button" class="primary-button compact" data-open-agent data-agent-prompt="查询最近的检测历史">查询完整历史</button>
+          </header>
+          <div class="history-toolbar">
+            <label><span>检测来源</span><select id="historySourceFilter"><option value="all">全部来源</option><option value="image">图片检测</option><option value="video">视频检测</option><option value="agent">智能体任务</option></select></label>
+            <label><span>风险等级</span><select id="historyRiskFilter"><option value="all">全部风险</option><option value="high">高风险</option><option value="medium">中风险</option><option value="low">低风险</option><option value="none">无报警</option></select></label>
+            <div class="history-note"><strong>数据范围</strong><span>此页展示当前浏览器的任务留痕；SQLite 完整记录由智能体查询。</span></div>
+          </div>
+          <div class="history-table-wrap">
+            <table class="history-table"><thead><tr><th>检测时间</th><th>任务来源</th><th>检测摘要</th><th>风险等级</th><th>处置状态</th><th>操作</th></tr></thead><tbody id="historyRows"></tbody></table>
+            <div id="historyEmpty" class="table-empty"><strong>暂无符合条件的检测记录</strong><span>完成智能体检测任务后，这里会自动生成前端留痕。</span></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="agentOverlay" class="agent-overlay" data-close-agent></div>
+  <aside id="agentDrawer" class="agent-drawer" aria-hidden="true" aria-label="智能巡检助手">
+    <div class="agent-drawer__bar"><div><span>GLOBAL COPILOT</span><strong>巡检助手</strong></div><button type="button" data-close-agent aria-label="关闭智能巡检助手">关闭</button></div>
+    {% include "components/agent_chat.html" %}
+  </aside>
 
   <script src="{{ url_for('static', filename='web_app.js') }}"></script>
   <script type="module" src="{{ url_for('static', filename='agent_chat/agent_chat.js') }}"></script>
