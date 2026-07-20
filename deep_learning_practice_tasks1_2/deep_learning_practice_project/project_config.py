@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+CONFIG_DIR = PROJECT_ROOT / "config"
 DATA_DIR = PROJECT_ROOT / "data"
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 RUNS_DIR = PROJECT_ROOT / "runs"
@@ -35,4 +36,8 @@ YOLO_RUN_NAME = env_text("YOLO_RUN_NAME", "yiwu_yolov8s_4class")
 YOLO_MODEL_PATH = env_path(
     "YOLO_MODEL_PATH",
     YOLO_RUN_DIR / YOLO_RUN_NAME / "weights" / "best.pt",
+)
+VIDEO_SOURCES_PATH = env_path(
+    "VIDEO_SOURCES_PATH",
+    CONFIG_DIR / "video_sources.json",
 )

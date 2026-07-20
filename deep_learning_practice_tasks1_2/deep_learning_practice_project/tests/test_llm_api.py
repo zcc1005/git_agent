@@ -191,6 +191,110 @@ class OpenAICompatiblePlannerTests(unittest.TestCase):
         with self.assertRaisesRegex(LLMAPIError, "只能是"):
             OpenAICompatibleSkillPlanner._parse_plan(payload, catalog=catalog)
 
+    def test_nested_schema_defaults_and_types_are_enforced_by_planner(self) -> None:
+        catalog = [
+            {
+                "name": "detect-video",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "sample_fps": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 60,
+                                    "default": 4.0,
+                                }
+                            },
+                            "additionalProperties": False,
+                        }
+                    },
+                    "additionalProperties": False,
+                },
+            }
+        ]
+        valid_payload = {
+            "steps": [{"skill_name": "detect-video", "arguments": {"parameters": {}}}]
+        }
+        invalid_payload = {
+            "steps": [
+                {
+                    "skill_name": "detect-video",
+                    "arguments": {"parameters": {"sample_fps": "4"}},
+                }
+            ]
+        }
+
+        plan = OpenAICompatibleSkillPlanner._parse_plan(valid_payload, catalog=catalog)
+
+        self.assertEqual(plan.steps[0].arguments["parameters"]["sample_fps"], 4.0)
+        with self.assertRaisesRegex(LLMAPIError, "number"):
+            OpenAICompatibleSkillPlanner._parse_plan(invalid_payload, catalog=catalog)
+
+    def test_llm_time_text_is_replaced_before_schema_validation(self) -> None:
+        def transport(url, body, headers, timeout):
+            del url, body, headers, timeout
+            plan = {
+                "steps": [
+                    {
+                        "skill_name": "query-history",
+                        "arguments": {
+                            "date": "今天",
+                            "start_time": "上午八点",
+                            "end_time": "上午九点",
+                        },
+                    }
+                ]
+            }
+            return {"choices": [{"message": {"content": json.dumps(plan)}}]}
+
+        planner = OpenAICompatibleSkillPlanner(
+            OpenAICompatibleClient(
+                LLMAPIConfig("secret", "https://example.test/v1", "planner"),
+                transport=transport,
+            )
+        )
+        catalog = [
+            {
+                "name": "query-history",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "date": {"type": "string", "format": "date"},
+                        "start_time": {"type": "string", "format": "date-time"},
+                        "end_time": {"type": "string", "format": "date-time"},
+                    },
+                    "additionalProperties": False,
+                },
+            }
+        ]
+        temporal = {
+            "kind": "absolute",
+            "start_time": "2026-07-20T08:00:00+08:00",
+            "end_time": "2026-07-20T09:00:00+08:00",
+        }
+
+        plan = planner.plan(
+            "查询今天上午8点到9点",
+            catalog=catalog,
+            context={
+                "session_id": "s1",
+                "current_date": "2026-07-20",
+                "current_time": "2026-07-20T10:30:00+08:00",
+                "timezone": "Asia/Shanghai",
+                "temporal_resolution": temporal,
+                "history": [],
+                "request_context": {},
+            },
+        )
+
+        arguments = plan.steps[0].arguments
+        self.assertNotIn("date", arguments)
+        self.assertEqual(arguments["start_time"], temporal["start_time"])
+        self.assertEqual(arguments["end_time"], temporal["end_time"])
+
     def test_env_factory_links_model_planner_to_agent_service(self) -> None:
         def transport(url, body, headers, timeout):
             del url, body, headers, timeout
@@ -282,6 +386,51 @@ class AgentSkillOrchestrationTests(unittest.TestCase):
         self.assertEqual(result["intent"], "skill_plan")
         self.assertEqual(result["data"]["completed_steps"], 1)
         self.assertEqual(planner.calls[0]["context"]["session_id"], "default")
+
+    def test_deterministic_time_context_overrides_model_time_arguments(self) -> None:
+        planner = StaticSkillPlanner(
+            SkillPlan(
+                steps=(
+                    SkillPlanStep(
+                        "query-history",
+                        {
+                            "date": "2020-01-01",
+                            "start_time": "2020-01-01T00:00:00+08:00",
+                            "end_time": "2020-01-01T01:00:00+08:00",
+                        },
+                    ),
+                )
+            )
+        )
+        service = AgentService(self.store, tools=self.tools, skill_planner=planner)
+
+        result = service.chat("查询今天上午8点到9点的高风险记录")
+
+        planning_context = planner.calls[0]["context"]
+        self.assertEqual(planning_context["current_date"], "2026-07-16")
+        self.assertEqual(planning_context["timezone"], "Asia/Shanghai")
+        self.assertEqual(
+            planning_context["temporal_resolution"]["start_time"],
+            "2026-07-16T08:00:00+08:00",
+        )
+        arguments = result["data"]["plan"]["steps"][0]["arguments"]
+        self.assertNotIn("date", arguments)
+        self.assertEqual(arguments["start_time"], "2026-07-16T08:00:00+08:00")
+        self.assertEqual(arguments["end_time"], "2026-07-16T09:00:00+08:00")
+
+    def test_video_offset_expression_is_injected_into_detection_plan(self) -> None:
+        planner = StaticSkillPlanner(
+            SkillPlan(steps=(SkillPlanStep("detect-video", {}),))
+        )
+        service = AgentService(self.store, tools=self.tools, skill_planner=planner)
+
+        result = service.chat("检测视频第10分钟到第20分钟")
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["requires_attachment"])
+        arguments = result["data"]["plan"]["steps"][0]["arguments"]
+        self.assertEqual(arguments["start_offset_seconds"], 600)
+        self.assertEqual(arguments["end_offset_seconds"], 1200)
 
     def test_always_mode_plans_an_existing_simple_intent(self) -> None:
         planner = StaticSkillPlanner(

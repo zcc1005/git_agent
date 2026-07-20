@@ -11,6 +11,14 @@ from .service import AgentService
 from .planners import SkillPlan, SkillPlanner, SkillPlanningError, SkillPlanStep
 from .skills import RuntimeSkill, SkillRegistry, SkillResult, SkillSpec
 from .tools import AgentTools, ImageDetectionOutcome, VideoDetectionOutcome
+from .video_sources import (
+    LongVideoSource,
+    LongVideoSourceRegistry,
+    VideoResolution,
+    VideoSegment,
+    VideoZone,
+    load_video_source_registry,
+)
 
 __all__ = [
     "AgentService",
@@ -32,4 +40,10 @@ __all__ = [
     "SkillPlanner",
     "SkillPlanningError",
     "SkillPlanStep",
+    "LongVideoSource",
+    "LongVideoSourceRegistry",
+    "VideoResolution",
+    "VideoSegment",
+    "VideoZone",
+    "load_video_source_registry",
 ]

@@ -35,6 +35,7 @@ deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/
 # Machine-specific project configuration
 deep_learning_practice_tasks1_2/deep_learning_practice_project/config/local.yaml
 deep_learning_practice_tasks1_2/deep_learning_practice_project/config/*.local.yaml
+deep_learning_practice_tasks1_2/deep_learning_practice_project/.local/
 
 # Model weights, checkpoints, and serialized training outputs
 *.pt

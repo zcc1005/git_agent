@@ -22,6 +22,7 @@ class AgentSkillTests(unittest.TestCase):
         )
         self.video_calls = []
         self.image_calls = []
+        self.segment_calls = []
 
         def video_runner(video_path, video_start, parameters):
             self.video_calls.append((video_path, video_start, parameters))
@@ -59,10 +60,17 @@ class AgentSkillTests(unittest.TestCase):
             }
             return ImageDetectionOutcome(detection, alarm, "图片报警报告")
 
+        def video_segmenter(video_path, start_offset, end_offset):
+            self.segment_calls.append((video_path, start_offset, end_offset))
+            segment_path = self.root / "segment.mp4"
+            segment_path.write_bytes(b"segment")
+            return segment_path
+
         tools = AgentTools(
             self.store,
             detection_runner=video_runner,
             image_detection_runner=image_runner,
+            video_segmenter=video_segmenter,
             now=lambda: FIXED_NOW,
         )
         self.service = AgentService(self.store, tools=tools)
@@ -95,6 +103,13 @@ class AgentSkillTests(unittest.TestCase):
         self.assertEqual(action_schema["enum"], ["query", "confirm", "cancel"])
         self.assertEqual(action_schema["default"], "query")
         self.assertEqual(action_schema["aliases"]["view"], "query")
+        for item in catalog:
+            self.assertIn("input_schema", item)
+            self.assertFalse(item["input_schema"]["additionalProperties"])
+            self.assertEqual(
+                set(item["input_schema"]["properties"]),
+                set(item["required_inputs"]) | set(item["optional_inputs"]),
+            )
         with self.assertRaises(LookupError):
             self.service.run_skill("arbitrary-python", arguments={})
 
@@ -177,6 +192,75 @@ class AgentSkillTests(unittest.TestCase):
         self.assertEqual(record.source_started_at, "2026-07-16T08:00:00+00:00")
         self.assertEqual(record.source_ended_at, "2026-07-16T08:30:00+00:00")
 
+    def test_video_schema_applies_defaults_and_rejects_nested_type_errors(self) -> None:
+        result = self.service.run_skill(
+            "detect-video",
+            arguments={
+                "video_path": str(self.video),
+                "parameters": {"conf": 0.2, "known_conf": 0.5},
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        parameters = self.video_calls[-1][2]
+        self.assertEqual(parameters["sample_fps"], 4.0)
+        self.assertEqual(parameters["imgsz"], 800)
+        self.assertEqual(parameters["track_center_distance_ratio"], 3.0)
+        self.assertIsNone(parameters["roi"])
+
+        invalid_type = self.service.run_skill(
+            "detect-video",
+            arguments={
+                "video_path": str(self.video),
+                "parameters": {"sample_fps": "2"},
+            },
+        )
+        unknown_nested = self.service.run_skill(
+            "detect-video",
+            arguments={
+                "video_path": str(self.video),
+                "parameters": {"unsupported_threshold": 0.5},
+            },
+        )
+
+        self.assertFalse(invalid_type["ok"])
+        self.assertEqual(invalid_type["error_code"], "invalid_arguments")
+        self.assertFalse(unknown_nested["ok"])
+        self.assertEqual(unknown_nested["error_code"], "invalid_arguments")
+
+    def test_video_offsets_use_segment_adapter_and_adjust_real_start_time(self) -> None:
+        result = self.service.run_skill(
+            "detect-video",
+            session_id="operator",
+            arguments={
+                "video_path": str(self.video),
+                "video_start_time": "2026-07-16T08:00:00+00:00",
+                "start_offset_seconds": 60,
+                "end_offset_seconds": 120,
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.segment_calls[0], (self.video, 60.0, 120.0))
+        self.assertEqual(self.video_calls[-1][0], self.root / "segment.mp4")
+        self.assertEqual(
+            self.video_calls[-1][1].isoformat(),
+            "2026-07-16T08:01:00+00:00",
+        )
+        self.assertEqual(result["data"]["start_offset_seconds"], 60.0)
+        self.assertEqual(result["data"]["end_offset_seconds"], 120.0)
+
+        invalid = self.service.run_skill(
+            "detect-video",
+            arguments={
+                "video_path": str(self.video),
+                "start_offset_seconds": 120,
+                "end_offset_seconds": 60,
+            },
+        )
+        self.assertFalse(invalid["ok"])
+        self.assertEqual(invalid["error_code"], "invalid_arguments")
+
     def test_invalid_parameters_fail_before_detector_call(self) -> None:
         result = self.service.run_skill(
             "detect-video",
@@ -234,6 +318,50 @@ class AgentSkillTests(unittest.TestCase):
         actions = self.store.list_detection_review_actions(detection_id)
         self.assertEqual(actions[0]["action"], "close")
 
+    def test_history_date_and_filter_aliases_are_normalized(self) -> None:
+        self.service.run_skill(
+            "detect-image",
+            arguments={
+                "image_path": str(self.image),
+                "line_id": "line-2",
+                "captured_at": "2026-07-16T09:10:00+00:00",
+            },
+        )
+
+        history = self.service.run_skill(
+            "query-history",
+            arguments={
+                "date": "2026-07-16",
+                "risk_level": "高风险",
+                "source_type": "图片",
+                "line_id": "line-2",
+            },
+        )
+        conflict = self.service.run_skill(
+            "query-history",
+            arguments={
+                "date": "2026-07-16",
+                "start_time": "2026-07-16T08:00:00+00:00",
+            },
+        )
+
+        self.assertTrue(history["ok"])
+        self.assertEqual(history["data"]["count"], 1)
+        self.assertFalse(conflict["ok"])
+        self.assertEqual(conflict["error_code"], "invalid_arguments")
+
+    def test_review_action_is_required_and_closed_enum(self) -> None:
+        missing = self.service.run_skill("review-detection", arguments={})
+        invalid = self.service.run_skill(
+            "review-detection",
+            arguments={"action": "approve"},
+        )
+
+        self.assertFalse(missing["ok"])
+        self.assertEqual(missing["error_code"], "invalid_arguments")
+        self.assertFalse(invalid["ok"])
+        self.assertEqual(invalid["error_code"], "invalid_arguments")
+
     def test_composite_inspection_infers_image_and_persists_alarm(self) -> None:
         result = self.service.run_skill(
             "run-inspection-task",
@@ -248,6 +376,22 @@ class AgentSkillTests(unittest.TestCase):
         )
         self.assertTrue(current["data"]["found"])
         self.assertEqual(current["data"]["risk_level"], "high")
+
+    def test_composite_inspection_accepts_explicit_path_and_rejects_conflicts(self) -> None:
+        explicit_path = self.service.run_skill(
+            "run-inspection-task",
+            session_id="operator",
+            arguments={"image_path": str(self.image), "line_id": "line-3"},
+        )
+        conflicting = self.service.run_skill(
+            "run-inspection-task",
+            arguments={
+                "image_path": str(self.image),
+                "video_path": str(self.video),
+            },
+        )
+        self.assertTrue(explicit_path["ok"])
+        self.assertFalse(conflicting["ok"])
 
     def test_risk_skill_reads_detection_object(self) -> None:
         detection = {

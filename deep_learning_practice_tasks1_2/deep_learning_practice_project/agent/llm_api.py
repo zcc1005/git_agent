@@ -6,6 +6,7 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 
@@ -13,6 +14,7 @@ from project_config import PROJECT_ROOT
 
 from .planners import SkillPlan, SkillPlanner, SkillPlanningError, SkillPlanStep
 from .service import AgentService, create_default_service
+from .skills.base import normalize_schema_arguments
 
 
 JSONTransport = Callable[[str, bytes, Mapping[str, str], float], Dict[str, Any]]
@@ -212,6 +214,11 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
             "报警 confirm/cancel 及 review-detection 写操作只有在用户明确要求时才能规划。"
             "control-alarm.action 只能输出 query、confirm、cancel；查看、查询、显示、获取报警状态"
             "一律输出 query，禁止输出 view、show、get、status。"
+            "严格遵守每个 Skill 的 input_schema；枚举只输出规范值，数值、布尔值和数组不得写成字符串。"
+            "context 明确提供 current_date、current_time、timezone 和 deterministic temporal_resolution。"
+            "涉及时间时必须原样使用 temporal_resolution，禁止自行重新计算。绝对区间使用 start_time/end_time，"
+            "视频内区间使用 start_offset_seconds/end_offset_seconds。"
+            "若 temporal_resolution.kind=invalid，必须设置 needs_clarification=true 并说明时间错误。"
             "缺少媒体路径、时间范围对应的实际文件或关键参数时，设置 needs_clarification=true。\n"
             "后续步骤可用 $steps.0.data.detection_id 形式引用前一步结果。\n"
             "严格返回 JSON 对象，结构为："
@@ -234,7 +241,53 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
                 {"role": "user", "content": user_prompt},
             ]
         )
+        payload = self._apply_temporal_resolution_to_payload(
+            payload,
+            safe_context["temporal_resolution"],
+        )
         return self._parse_plan(payload, catalog=catalog)
+
+    @staticmethod
+    def _apply_temporal_resolution_to_payload(
+        payload: Mapping[str, Any],
+        temporal_resolution: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        normalized_payload = dict(payload)
+        raw_steps = payload.get("steps")
+        if not isinstance(raw_steps, list):
+            return normalized_payload
+        kind = str(temporal_resolution.get("kind") or "")
+        normalized_steps = []
+        for raw_step in raw_steps:
+            if not isinstance(raw_step, Mapping):
+                normalized_steps.append(raw_step)
+                continue
+            step = dict(raw_step)
+            skill_name = str(step.get("skill_name") or "")
+            raw_arguments = step.get("arguments")
+            arguments = dict(raw_arguments) if isinstance(raw_arguments, Mapping) else raw_arguments
+            if isinstance(arguments, dict):
+                if kind == "absolute" and skill_name in {
+                    "query-history",
+                    "generate-risk-report",
+                }:
+                    arguments.pop("date", None)
+                    arguments["start_time"] = temporal_resolution["start_time"]
+                    arguments["end_time"] = temporal_resolution["end_time"]
+                if kind == "offset" and skill_name in {
+                    "detect-video",
+                    "run-inspection-task",
+                }:
+                    arguments["start_offset_seconds"] = temporal_resolution[
+                        "start_offset_seconds"
+                    ]
+                    arguments["end_offset_seconds"] = temporal_resolution[
+                        "end_offset_seconds"
+                    ]
+                step["arguments"] = arguments
+            normalized_steps.append(step)
+        normalized_payload["steps"] = normalized_steps
+        return normalized_payload
 
     @staticmethod
     def _safe_context(context: Mapping[str, Any]) -> Dict[str, Any]:
@@ -251,8 +304,18 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
         request_context = context.get("request_context")
         if not isinstance(request_context, Mapping):
             request_context = {}
+        current_time = str(context.get("current_time") or "")
+        if not current_time:
+            current_time = datetime.now().astimezone().isoformat(timespec="seconds")
+        temporal_resolution = context.get("temporal_resolution")
+        if not isinstance(temporal_resolution, Mapping):
+            temporal_resolution = {}
         return {
             "session_id": str(context.get("session_id") or ""),
+            "current_date": str(context.get("current_date") or current_time[:10]),
+            "current_time": current_time,
+            "timezone": str(context.get("timezone") or "Asia/Shanghai"),
+            "temporal_resolution": dict(temporal_resolution),
             "history": safe_history,
             "request_context": dict(request_context),
         }
@@ -307,55 +370,14 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
         input_schema = skill_spec.get("input_schema")
         if not isinstance(input_schema, Mapping):
             return normalized
-        properties = input_schema.get("properties") or {}
-        if not isinstance(properties, Mapping):
-            raise LLMAPIError(f"Skill {skill_name} 的 input_schema.properties 必须是对象")
-
-        if input_schema.get("additionalProperties") is False:
-            unknown = sorted(set(normalized) - set(properties))
-            if unknown:
-                raise LLMAPIError(
-                    f"Skill {skill_name} 包含协议外参数：{', '.join(unknown)}"
-                )
-
-        for parameter_name, raw_schema in properties.items():
-            if not isinstance(raw_schema, Mapping):
-                continue
-            if parameter_name not in normalized:
-                if "default" in raw_schema:
-                    normalized[parameter_name] = raw_schema["default"]
-                continue
-
-            value = normalized[parameter_name]
-            aliases = raw_schema.get("aliases") or {}
-            if isinstance(value, str) and isinstance(aliases, Mapping):
-                alias_key = value.strip().lower()
-                if alias_key in aliases:
-                    value = aliases[alias_key]
-                    normalized[parameter_name] = value
-
-            allowed_values = raw_schema.get("enum")
-            if isinstance(allowed_values, (list, tuple)) and value not in allowed_values:
-                choices = ", ".join(str(item) for item in allowed_values)
-                raise LLMAPIError(
-                    f"Skill {skill_name}.{parameter_name} 只能是：{choices}"
-                )
-
-            expected_type = raw_schema.get("type")
-            type_checks = {
-                "string": lambda item: isinstance(item, str),
-                "boolean": lambda item: isinstance(item, bool),
-                "integer": lambda item: isinstance(item, int) and not isinstance(item, bool),
-                "number": lambda item: isinstance(item, (int, float)) and not isinstance(item, bool),
-                "object": lambda item: isinstance(item, Mapping),
-                "array": lambda item: isinstance(item, (list, tuple)),
-            }
-            checker = type_checks.get(str(expected_type or ""))
-            if checker is not None and not checker(value):
-                raise LLMAPIError(
-                    f"Skill {skill_name}.{parameter_name} 必须是 {expected_type} 类型"
-                )
-        return normalized
+        try:
+            return normalize_schema_arguments(
+                normalized,
+                input_schema,
+                enforce_required=False,
+            )
+        except ValueError as exc:
+            raise LLMAPIError(f"Skill {skill_name} 参数协议校验失败：{exc}") from exc
 
 
 def create_llm_enabled_service(

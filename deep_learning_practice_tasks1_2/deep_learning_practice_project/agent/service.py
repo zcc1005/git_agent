@@ -3,13 +3,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
+from zoneinfo import ZoneInfo
 
 from project_config import OUTPUTS_DIR
 from storage import SQLiteHistoryStore
 
 from .intents import Intent
 from .intents import RuleBasedIntentRecognizer
-from .planners import SkillPlan, SkillPlanner, SkillPlanningError
+from .planners import SkillPlan, SkillPlanner, SkillPlanningError, SkillPlanStep
 from .recognizers import (
     HybridIntentRecognizer,
     IntentRecognizer,
@@ -17,6 +18,7 @@ from .recognizers import (
 )
 from .router import ToolRouter
 from .skills import SkillRegistry, create_builtin_skill_registry
+from .temporal import DEFAULT_TIMEZONE, resolve_temporal_expression
 from .tools import AgentTools
 
 
@@ -30,7 +32,11 @@ ATTACHMENT_LABELS = {"image": "图片", "video": "视频"}
 
 PLANNING_HINT = re.compile(
     r"(?:\d{1,2}[：:]\d{2}.*(?:-|到|至).*\d{1,2}[：:]\d{2}|"
-    r"今天.*(?:上午|下午|早上|晚上).*(?:-|到|至)|ROI|抽帧|阈值|线路|"
+    r"今天.*(?:上午|下午|早上|晚上)|"
+    r"(?:凌晨|早上|上午|中午|下午|晚上)?\s*\d{1,2}(?:点|时).*?(?:到|至).*?\d{1,2}(?:点|时)|"
+    r"ROI|抽帧|阈值|线路|"
+    r"昨天|前天|最近\s*(?:\d+|一|两|半)*(?:分钟|小时|天)|"
+    r"第?\s*\d+(?:\.\d+)?\s*分钟|从\s*\d{1,2}[：:]\d{2}\s*检测到|"
     r"风险研判|人工复核|误报|假阳性|闭环|处理完成|"
     r"并且|然后|同时|随后|再生成|以及)",
     re.I,
@@ -52,6 +58,7 @@ class AgentService:
         skill_registry: Optional[SkillRegistry] = None,
         skill_planner: Optional[SkillPlanner] = None,
         skill_planner_mode: str = "hybrid",
+        timezone_name: str = DEFAULT_TIMEZONE,
     ) -> None:
         if recognizer is not None and model_recognizer is not None:
             raise ValueError("recognizer 与 model_recognizer 不能同时提供")
@@ -63,6 +70,7 @@ class AgentService:
         self.tools = tools or AgentTools(self.store)
         self.skill_registry = skill_registry or create_builtin_skill_registry(self.tools)
         self.skill_planner = skill_planner
+        self.timezone_name = timezone_name
         self.skill_planner_mode = skill_planner_mode.strip().lower()
         if self.skill_planner_mode not in {"hybrid", "always"}:
             raise ValueError("skill_planner_mode 只能是 hybrid 或 always")
@@ -252,6 +260,10 @@ class AgentService:
         )
         if not isinstance(plan, SkillPlan):
             raise SkillPlanningError("Skill Planner 必须返回 SkillPlan")
+        plan = self._apply_temporal_resolution(
+            plan,
+            planning_context.get("temporal_resolution"),
+        )
         if plan.needs_clarification:
             return {
                 "ok": False,
@@ -323,6 +335,44 @@ class AgentService:
                 "completed_steps": sum(bool(item.get("ok")) for item in step_results),
             },
         }
+
+    @staticmethod
+    def _apply_temporal_resolution(
+        plan: SkillPlan,
+        temporal_resolution: Any,
+    ) -> SkillPlan:
+        if not isinstance(temporal_resolution, Mapping):
+            return plan
+        kind = str(temporal_resolution.get("kind") or "")
+        if kind not in {"absolute", "offset"}:
+            return plan
+        updated_steps = []
+        for step in plan.steps:
+            arguments = dict(step.arguments)
+            if kind == "absolute" and step.skill_name in {
+                "query-history",
+                "generate-risk-report",
+            }:
+                arguments.pop("date", None)
+                arguments["start_time"] = temporal_resolution["start_time"]
+                arguments["end_time"] = temporal_resolution["end_time"]
+            if kind == "offset" and step.skill_name in {
+                "detect-video",
+                "run-inspection-task",
+            }:
+                arguments["start_offset_seconds"] = temporal_resolution[
+                    "start_offset_seconds"
+                ]
+                arguments["end_offset_seconds"] = temporal_resolution[
+                    "end_offset_seconds"
+                ]
+            updated_steps.append(SkillPlanStep(step.skill_name, arguments))
+        return SkillPlan(
+            steps=tuple(updated_steps),
+            needs_clarification=plan.needs_clarification,
+            clarification=plan.clarification,
+            summary=plan.summary,
+        )
 
     @staticmethod
     def _resolve_step_references(
@@ -403,8 +453,25 @@ class AgentService:
             {"attachment": incoming_attachment} if incoming_attachment else None
         )
         self.store.record_message(session_id, "user", message, metadata=user_metadata)
+        current_time = self.tools.current_time()
+        try:
+            temporal_resolution = resolve_temporal_expression(
+                message,
+                now=current_time,
+                timezone_name=self.timezone_name,
+            )
+        except ValueError as exc:
+            temporal_resolution = {
+                "kind": "invalid",
+                "error": str(exc),
+            }
+        localized_time = current_time.astimezone(ZoneInfo(self.timezone_name))
         recognition_context = {
             "session_id": session_id,
+            "current_date": localized_time.date().isoformat(),
+            "current_time": localized_time.isoformat(timespec="seconds"),
+            "timezone": self.timezone_name,
+            "temporal_resolution": temporal_resolution,
             "history": self.store.list_messages(session_id, limit=12),
             "request_context": planning_request_context,
         }

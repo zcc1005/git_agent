@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
 from agent.tools import AgentTools
 
 from .base import RuntimeSkill, SkillRegistry, SkillSpec
+from .schemas import ALL_SKILL_SCHEMAS
 
 
 RISK_LEVELS = {"none", "low", "medium", "high"}
@@ -17,40 +19,6 @@ ALARM_READ_ACTION_ALIASES = {
     "show": "query",
     "get": "query",
     "status": "query",
-}
-CONTROL_ALARM_INPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "action": {
-            "type": "string",
-            "enum": ["query", "confirm", "cancel"],
-            "default": "query",
-            "description": (
-                "报警操作。查看、查询、显示、获取当前报警或报警状态时必须传 query；"
-                "只有用户明确要求确认或取消时才能分别传 confirm 或 cancel。"
-            ),
-            "aliases": dict(ALARM_READ_ACTION_ALIASES),
-        },
-        "alarm_id": {
-            "type": "string",
-            "description": "可选的明确报警 ID；未提供时查询或操作当前报警。",
-        },
-        "line_id": {
-            "type": "string",
-            "description": "查询当前报警时使用的可选线路标识。",
-        },
-        "session_only": {
-            "type": "boolean",
-            "default": False,
-            "description": "为 true 时仅查询当前会话的报警。",
-        },
-        "note": {
-            "type": "string",
-            "description": "确认或取消报警时写入审计记录的可选操作说明。",
-        },
-    },
-    "required": [],
-    "additionalProperties": False,
 }
 IMAGE_PARAMETERS = {
     "conf",
@@ -105,7 +73,6 @@ def _parameters(values: Dict[str, Any], allowed: set[str]) -> Dict[str, Any]:
         "cross_class_containment",
         "max_area_ratio",
         "track_iou",
-        "track_center_distance_ratio",
     ):
         if name in normalized and not 0 < float(normalized[name]) < 1:
             raise ValueError(f"{name} 必须位于 0 到 1 之间")
@@ -120,8 +87,30 @@ def _validate_image(arguments: Mapping[str, Any]) -> Dict[str, Any]:
 def _validate_video(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     values = _parameters(dict(arguments), VIDEO_PARAMETERS)
     parameters = values["parameters"]
-    if "sample_fps" in parameters and float(parameters["sample_fps"]) <= 0:
-        raise ValueError("sample_fps 必须大于 0")
+    if "sample_fps" in parameters and not 0 < float(parameters["sample_fps"]) <= 60:
+        raise ValueError("sample_fps 必须大于 0 且不超过 60")
+    if float(parameters.get("event_silence_seconds", 1.0)) <= 0:
+        raise ValueError("event_silence_seconds 必须大于 0")
+    if float(parameters.get("track_max_age_seconds", 1.0)) < 0:
+        raise ValueError("track_max_age_seconds 不能小于 0")
+    if int(parameters.get("min_unknown_hits", 2)) < 1:
+        raise ValueError("min_unknown_hits 必须至少为 1")
+    if float(parameters.get("track_center_distance_ratio", 3.0)) <= 0:
+        raise ValueError("track_center_distance_ratio 必须大于 0")
+    conf = float(parameters.get("conf", 0.25))
+    known_conf = float(parameters.get("known_conf", 0.40))
+    unknown_conf = float(parameters.get("unknown_single_frame_conf", 0.40))
+    if not conf <= unknown_conf <= known_conf:
+        raise ValueError("unknown_single_frame_conf 必须位于 conf 与 known_conf 之间")
+    start_offset = float(values.get("start_offset_seconds", 0.0))
+    end_offset = values.get("end_offset_seconds")
+    if start_offset < 0:
+        raise ValueError("start_offset_seconds 不能小于 0")
+    if end_offset is not None and float(end_offset) <= start_offset:
+        raise ValueError("end_offset_seconds 必须大于 start_offset_seconds")
+    values["start_offset_seconds"] = start_offset
+    if end_offset is not None:
+        values["end_offset_seconds"] = float(end_offset)
     if "roi" in parameters and parameters["roi"] is not None:
         roi = parameters["roi"]
         if not isinstance(roi, (list, tuple)) or len(roi) != 4:
@@ -135,6 +124,8 @@ def _validate_video(arguments: Mapping[str, Any]) -> Dict[str, Any]:
 
 def _validate_risk(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     values = dict(arguments)
+    if values.get("detection_json") and isinstance(values.get("detection"), dict):
+        raise ValueError("detection_json 与 detection 只能提供一个")
     if not values.get("detection_json") and not isinstance(values.get("detection"), dict):
         raise ValueError("必须提供 detection_json 或 detection")
     source_type = str(values.get("source_type") or "auto").lower()
@@ -154,8 +145,30 @@ def _validate_alarm(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     return values
 
 
-def _validate_filters(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+def _validate_filters(
+    arguments: Mapping[str, Any], *, include_limit: bool
+) -> Dict[str, Any]:
     values = dict(arguments)
+    target_date = values.get("date")
+    if target_date and (values.get("start_time") or values.get("end_time")):
+        raise ValueError("date 不能与 start_time 或 end_time 同时使用")
+    if target_date:
+        day = target_date if isinstance(target_date, date) else date.fromisoformat(str(target_date))
+        values["start_time"] = datetime.combine(day, time.min).astimezone().isoformat()
+        values["end_time"] = datetime.combine(day, time.max).astimezone().isoformat()
+    start_time = values.get("start_time")
+    end_time = values.get("end_time")
+    if start_time and end_time:
+        start = datetime.fromisoformat(str(start_time).replace("Z", "+00:00"))
+        end = datetime.fromisoformat(str(end_time).replace("Z", "+00:00"))
+        if start.tzinfo is None:
+            start = start.astimezone()
+        if end.tzinfo is None:
+            end = end.astimezone()
+        if start > end:
+            raise ValueError("start_time 不能晚于 end_time")
+        values["start_time"] = start.isoformat()
+        values["end_time"] = end.isoformat()
     risk = str(values.get("risk_level") or "").lower()
     if risk and risk not in RISK_LEVELS:
         raise ValueError("risk_level 只能是 none、low、medium 或 high")
@@ -165,21 +178,30 @@ def _validate_filters(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     review = str(values.get("review_status") or "").lower()
     if review and review not in REVIEW_STATUSES:
         raise ValueError("review_status 值无效")
-    limit = int(values.get("limit", 100))
-    if not 1 <= limit <= 1000:
-        raise ValueError("limit 必须位于 1 到 1000 之间")
     values.update(
         risk_level=risk,
         source_type=source_type,
         review_status=review,
-        limit=limit,
     )
+    if include_limit:
+        limit = int(values.get("limit", 100))
+        if not 1 <= limit <= 1000:
+            raise ValueError("limit 必须位于 1 到 1000 之间")
+        values["limit"] = limit
     return values
+
+
+def _validate_history_filters(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    return _validate_filters(arguments, include_limit=True)
+
+
+def _validate_report_filters(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    return _validate_filters(arguments, include_limit=False)
 
 
 def _validate_review(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     values = dict(arguments)
-    action = str(values.get("action") or "confirm").lower()
+    action = str(values.get("action") or "").strip().lower()
     if action not in {"confirm", "reject", "close", "reopen"}:
         raise ValueError("action 只能是 confirm、reject、close 或 reopen")
     values["action"] = action
@@ -190,12 +212,23 @@ def _validate_inspection(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     values = dict(arguments)
     source_type = str(values.get("source_type") or "").lower()
     media_path = values.get("media_path")
+    image_path = values.get("image_path")
+    video_path = values.get("video_path")
+    if image_path and video_path:
+        raise ValueError("image_path 与 video_path 只能提供一个")
     if not source_type and media_path:
         suffix = Path(str(media_path)).suffix.lower()
         source_type = "image" if suffix in {".jpg", ".jpeg", ".png", ".bmp", ".webp"} else "video"
+    if not source_type and image_path:
+        source_type = "image"
+    if not source_type and video_path:
+        source_type = "video"
     if source_type not in SOURCE_TYPES:
         raise ValueError("source_type 必须是 image 或 video")
     path_key = "image_path" if source_type == "image" else "video_path"
+    incompatible_key = "video_path" if source_type == "image" else "image_path"
+    if values.get(incompatible_key):
+        raise ValueError(f"source_type={source_type} 与 {incompatible_key} 冲突")
     values[path_key] = values.get(path_key) or media_path
     if not values.get(path_key):
         raise ValueError(f"缺少 {path_key}")
@@ -213,6 +246,7 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
                 "检测单张或批量图片中的皮带异物并生成确定性风险结果。",
                 required_inputs=("image_path",),
                 optional_inputs=("parameters", "line_id", "captured_at", "source_started_at", "source_ended_at"),
+                input_schema=ALL_SKILL_SCHEMAS["detect-image"],
             ),
             tools.detect_image,
             _validate_image,
@@ -224,7 +258,8 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
                 "detect-video",
                 "按抽帧频率、阈值和 ROI 检测视频异物并生成事件与风险结果。",
                 required_inputs=("video_path",),
-                optional_inputs=("video_start_time", "source_ended_at", "line_id", "parameters"),
+                optional_inputs=("video_start_time", "source_ended_at", "line_id", "start_offset_seconds", "end_offset_seconds", "parameters"),
+                input_schema=ALL_SKILL_SCHEMAS["detect-video"],
             ),
             tools.detect_video,
             _validate_video,
@@ -236,6 +271,7 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
                 "assess-risk",
                 "读取检测 JSON 并返回确定性风险等级、原因和处置建议。",
                 optional_inputs=("detection_json", "detection", "source_type"),
+                input_schema=ALL_SKILL_SCHEMAS["assess-risk"],
             ),
             tools.assess_risk,
             _validate_risk,
@@ -247,6 +283,7 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
                 "parse-detection-result",
                 "规范化检测 JSON，并提取目标、事件、位置、置信度、时间和代表帧。",
                 optional_inputs=("detection_json", "detection", "source_type"),
+                input_schema=ALL_SKILL_SCHEMAS["parse-detection-result"],
             ),
             tools.parse_detection_result,
             _validate_risk,
@@ -271,7 +308,7 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
                 ),
                 optional_inputs=("action", "alarm_id", "line_id", "session_only", "note"),
                 safety="controlled-write",
-                input_schema=CONTROL_ALARM_INPUT_SCHEMA,
+                input_schema=ALL_SKILL_SCHEMAS["control-alarm"],
             ),
             alarm_handler,
             _validate_alarm,
@@ -282,10 +319,11 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
             SkillSpec(
                 "query-history",
                 "按时间、风险等级、线路、来源和复核状态查询检测历史。",
-                optional_inputs=("start_time", "end_time", "risk_level", "line_id", "source_type", "review_status", "limit", "include_details"),
+                optional_inputs=("date", "start_time", "end_time", "risk_level", "line_id", "source_type", "review_status", "limit", "include_details"),
+                input_schema=ALL_SKILL_SCHEMAS["query-history"],
             ),
             tools.query_history,
-            _validate_filters,
+            _validate_history_filters,
         )
     )
     registry.register(
@@ -293,10 +331,11 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
             SkillSpec(
                 "generate-risk-report",
                 "按日期或筛选条件汇总检测、风险、报警、异物和闭环状态。",
-                optional_inputs=("date", "start_time", "end_time", "risk_level", "line_id", "source_type", "review_status", "limit"),
+                optional_inputs=("date", "start_time", "end_time", "risk_level", "line_id", "source_type", "review_status"),
+                input_schema=ALL_SKILL_SCHEMAS["generate-risk-report"],
             ),
             tools.generate_risk_report,
-            _validate_filters,
+            _validate_report_filters,
         )
     )
     registry.register(
@@ -304,8 +343,10 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
             SkillSpec(
                 "review-detection",
                 "人工确认、驳回、关闭或重新打开检测结果并保留审计记录。",
-                optional_inputs=("detection_id", "action", "reviewer", "note"),
+                required_inputs=("action",),
+                optional_inputs=("detection_id", "reviewer", "note"),
                 safety="controlled-write",
+                input_schema=ALL_SKILL_SCHEMAS["review-detection"],
             ),
             tools.review_detection,
             _validate_review,
@@ -336,8 +377,9 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
                 optional_inputs=(
                     "media_path", "source_type", "image_path", "video_path",
                     "video_start_time", "source_ended_at", "captured_at",
-                    "source_started_at", "line_id", "parameters",
+                    "source_started_at", "line_id", "start_offset_seconds", "end_offset_seconds", "parameters",
                 ),
+                input_schema=ALL_SKILL_SCHEMAS["run-inspection-task"],
             ),
             inspection_handler,
             _validate_inspection,

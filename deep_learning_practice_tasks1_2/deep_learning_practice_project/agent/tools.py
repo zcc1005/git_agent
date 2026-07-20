@@ -35,6 +35,7 @@ class ImageDetectionOutcome:
 VideoDetectionRunner = Callable[[Path, datetime, Dict[str, Any]], VideoDetectionOutcome]
 ImageDetectionRunner = Callable[[Path, Dict[str, Any]], ImageDetectionOutcome]
 AlarmControlHandler = Callable[[str, AlarmRecord], None]
+VideoSegmenter = Callable[[Path, float, Optional[float]], Path]
 
 
 RISK_NAMES = {
@@ -86,6 +87,7 @@ class AgentTools:
         detection_runner: Optional[VideoDetectionRunner] = None,
         image_detection_runner: Optional[ImageDetectionRunner] = None,
         alarm_control_handler: Optional[AlarmControlHandler] = None,
+        video_segmenter: Optional[VideoSegmenter] = None,
         now: Optional[Callable[[], datetime]] = None,
     ) -> None:
         self.store = store
@@ -94,7 +96,13 @@ class AgentTools:
             image_detection_runner or self._run_existing_image_pipeline
         )
         self._alarm_control_handler = alarm_control_handler
+        self._video_segmenter = video_segmenter or self._extract_video_segment
         self._now = now or (lambda: datetime.now().astimezone())
+
+    def current_time(self) -> datetime:
+        """Return the clock used by tools so planning and execution share one time source."""
+        current = self._now()
+        return current if current.tzinfo is not None else current.astimezone()
 
     @staticmethod
     def video_event_frames(detection: Dict[str, Any]) -> list[Dict[str, Any]]:
@@ -219,8 +227,23 @@ class AgentTools:
         else:
             video_start = self._now()
 
+        start_offset = _float(context.get("start_offset_seconds"), 0.0)
+        end_offset = (
+            _float(context.get("end_offset_seconds"))
+            if context.get("end_offset_seconds") is not None
+            else None
+        )
+        detection_video_path = video_path
+        if start_offset > 0 or end_offset is not None:
+            detection_video_path = self._video_segmenter(
+                video_path,
+                start_offset,
+                end_offset,
+            )
+            video_start = video_start + timedelta(seconds=start_offset)
+
         parameters = dict(context.get("parameters") or {})
-        outcome = self._detection_runner(video_path, video_start, parameters)
+        outcome = self._detection_runner(detection_video_path, video_start, parameters)
         source_started_at = _normalize_datetime_text(
             outcome.detection.get("video_start_time") or video_start
         )
@@ -265,6 +288,13 @@ class AgentTools:
                 "line_id": detection_record.line_id,
                 "source_started_at": detection_record.source_started_at,
                 "source_ended_at": detection_record.source_ended_at,
+                "start_offset_seconds": start_offset,
+                "end_offset_seconds": end_offset,
+                "segment_path": (
+                    self._display_path(detection_video_path)
+                    if detection_video_path != video_path
+                    else ""
+                ),
                 "result_json": outcome.result_json,
                 "alarm_json": outcome.alarm_json,
                 "alarm_report_path": outcome.alarm_report_path,
@@ -654,6 +684,71 @@ class AgentTools:
         if source_type == "image":
             return 1 if bool(detection.get("has_foreign_object")) else 0
         return _integer(detection.get("num_events"), len(detection.get("events") or []))
+
+    @staticmethod
+    def _extract_video_segment(
+        video_path: Path,
+        start_offset: float,
+        end_offset: Optional[float],
+    ) -> Path:
+        """Extract a detection-only MP4 segment without changing detector internals."""
+        import cv2
+
+        capture = cv2.VideoCapture(str(video_path))
+        if not capture.isOpened():
+            raise ValueError(f"OpenCV 无法打开待切片视频：{video_path}")
+        writer = None
+        try:
+            fps = float(capture.get(cv2.CAP_PROP_FPS))
+            frame_count = max(0, int(capture.get(cv2.CAP_PROP_FRAME_COUNT)))
+            width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            if fps <= 0 or frame_count <= 0 or width <= 0 or height <= 0:
+                raise ValueError("无法读取视频 FPS、帧数或画面尺寸，不能按时间切片")
+            duration = frame_count / fps
+            effective_end = duration if end_offset is None else float(end_offset)
+            if start_offset >= duration:
+                raise ValueError(
+                    f"start_offset {start_offset:g} 超出视频时长 {duration:.3f} 秒"
+                )
+            if effective_end > duration + (0.5 / fps):
+                raise ValueError(
+                    f"end_offset {effective_end:g} 超出视频时长 {duration:.3f} 秒"
+                )
+
+            start_frame = max(0, int(round(start_offset * fps)))
+            end_frame = min(frame_count, int(round(effective_end * fps)))
+            if end_frame <= start_frame:
+                raise ValueError("视频切片结束帧必须晚于开始帧")
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            segment_dir = OUTPUTS_DIR / "agent_video_segments"
+            segment_dir.mkdir(parents=True, exist_ok=True)
+            segment_path = segment_dir / (
+                f"{video_path.stem}_{start_offset:g}_{effective_end:g}_{timestamp}.mp4"
+            )
+            writer = cv2.VideoWriter(
+                str(segment_path),
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                fps,
+                (width, height),
+            )
+            if not writer.isOpened():
+                raise ValueError("无法创建 MP4 视频切片")
+
+            capture.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+            for _ in range(start_frame, end_frame):
+                ok, frame = capture.read()
+                if not ok:
+                    break
+                writer.write(frame)
+        finally:
+            capture.release()
+            if writer is not None:
+                writer.release()
+        if not segment_path.is_file() or segment_path.stat().st_size == 0:
+            raise ValueError("视频切片生成失败")
+        return segment_path
 
     @staticmethod
     def _run_existing_image_pipeline(
