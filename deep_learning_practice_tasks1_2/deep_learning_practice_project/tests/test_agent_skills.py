@@ -6,7 +6,14 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agent import AgentService, AgentTools, ImageDetectionOutcome, VideoDetectionOutcome
+from agent import (
+    AgentService,
+    AgentTools,
+    ImageDetectionOutcome,
+    LongVideoSourceRegistry,
+    StreamProbeResult,
+    VideoDetectionOutcome,
+)
 from storage import SQLiteHistoryStore
 
 
@@ -23,6 +30,7 @@ class AgentSkillTests(unittest.TestCase):
         self.video_calls = []
         self.image_calls = []
         self.segment_calls = []
+        self.probe_calls = []
 
         def video_runner(video_path, video_start, parameters):
             self.video_calls.append((video_path, video_start, parameters))
@@ -66,11 +74,56 @@ class AgentSkillTests(unittest.TestCase):
             segment_path.write_bytes(b"segment")
             return segment_path
 
+        source_registry = LongVideoSourceRegistry.from_dict(
+            {
+                "schema_version": 2,
+                "timezone": "Asia/Shanghai",
+                "sources": [
+                    {
+                        "source_id": "main-monitor",
+                        "display_name": "皮带主监控",
+                        "source_kind": "rtsp",
+                        "video_path": "",
+                        "started_at": None,
+                        "line_id": "main-line",
+                        "zones": [],
+                        "manifest_path": "",
+                        "resolution": None,
+                        "duration_seconds": None,
+                        "segments": [],
+                        "stream": {
+                            "url_env": "MAIN_MONITOR_RTSP_URL",
+                            "transport": "tcp",
+                        },
+                    }
+                ],
+            }
+        )
+
+        def stream_probe_runner(source, environment):
+            self.probe_calls.append((source, environment))
+            return StreamProbeResult(
+                source_id=source.source_id,
+                display_name=source.display_name,
+                line_id=source.line_id,
+                online=True,
+                checked_at=FIXED_NOW.isoformat(),
+                latency_ms=120,
+                width=640,
+                height=360,
+                fps=25.0,
+                codec="h264",
+                backend="FFMPEG",
+                transport="tcp",
+            )
+
         tools = AgentTools(
             self.store,
             detection_runner=video_runner,
             image_detection_runner=image_runner,
             video_segmenter=video_segmenter,
+            stream_probe_runner=stream_probe_runner,
+            video_source_registry_loader=lambda: source_registry,
             now=lambda: FIXED_NOW,
         )
         self.service = AgentService(self.store, tools=tools)
@@ -96,6 +149,7 @@ class AgentSkillTests(unittest.TestCase):
                 "generate-risk-report",
                 "review-detection",
                 "run-inspection-task",
+                "probe-video-source",
             },
         )
         alarm_spec = next(item for item in catalog if item["name"] == "control-alarm")
@@ -112,6 +166,32 @@ class AgentSkillTests(unittest.TestCase):
             )
         with self.assertRaises(LookupError):
             self.service.run_skill("arbitrary-python", arguments={})
+
+    def test_probe_video_source_uses_registered_source_and_strict_arguments(self) -> None:
+        result = self.service.run_skill(
+            "probe-video-source",
+            session_id="operator",
+            arguments={"source_id": " MAIN-MONITOR "},
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["data"]["online"])
+        self.assertEqual(result["data"]["source_id"], "main-monitor")
+        self.assertEqual(result["data"]["codec"], "h264")
+        self.assertEqual(self.probe_calls[0][0].source_id, "main-monitor")
+        self.assertIsNone(self.probe_calls[0][1])
+
+        for arguments in (
+            {},
+            {"source_id": "rtsp://camera/live"},
+            {"source_id": "main-monitor", "transport": "udp"},
+        ):
+            invalid = self.service.run_skill(
+                "probe-video-source",
+                arguments=arguments,
+            )
+            self.assertFalse(invalid["ok"])
+            self.assertEqual(invalid["error_code"], "invalid_arguments")
 
     def test_alarm_view_alias_is_a_safe_read_only_fallback(self) -> None:
         result = self.service.run_skill(

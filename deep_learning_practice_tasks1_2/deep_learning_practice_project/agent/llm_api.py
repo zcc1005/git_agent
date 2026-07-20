@@ -214,6 +214,10 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
             "报警 confirm/cancel 及 review-detection 写操作只有在用户明确要求时才能规划。"
             "control-alarm.action 只能输出 query、confirm、cancel；查看、查询、显示、获取报警状态"
             "一律输出 query，禁止输出 view、show、get、status。"
+            "用户询问已注册监控是否在线、连接是否正常或要求检查监控连接时，必须调用"
+            "probe-video-source，并传 source_id；不得自行判断在线状态，也不得把 RTSP URL 作为参数。"
+            "必须依据 context.video_sources 将显示名称、线路和区域映射到 source_id；找不到唯一映射时"
+            "要求澄清，禁止猜测 source_id。"
             "严格遵守每个 Skill 的 input_schema；枚举只输出规范值，数值、布尔值和数组不得写成字符串。"
             "context 明确提供 current_date、current_time、timezone 和 deterministic temporal_resolution。"
             "涉及时间时必须原样使用 temporal_resolution，禁止自行重新计算。绝对区间使用 start_time/end_time，"
@@ -310,12 +314,35 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
         temporal_resolution = context.get("temporal_resolution")
         if not isinstance(temporal_resolution, Mapping):
             temporal_resolution = {}
+        video_sources = []
+        for item in context.get("video_sources") or []:
+            if not isinstance(item, Mapping):
+                continue
+            zones = []
+            for zone in item.get("zones") or []:
+                if isinstance(zone, Mapping):
+                    zones.append(
+                        {
+                            "zone_id": str(zone.get("zone_id") or ""),
+                            "display_name": str(zone.get("display_name") or ""),
+                        }
+                    )
+            video_sources.append(
+                {
+                    "source_id": str(item.get("source_id") or ""),
+                    "display_name": str(item.get("display_name") or ""),
+                    "line_id": str(item.get("line_id") or ""),
+                    "source_kind": str(item.get("source_kind") or ""),
+                    "zones": zones,
+                }
+            )
         return {
             "session_id": str(context.get("session_id") or ""),
             "current_date": str(context.get("current_date") or current_time[:10]),
             "current_time": current_time,
             "timezone": str(context.get("timezone") or "Asia/Shanghai"),
             "temporal_resolution": dict(temporal_resolution),
+            "video_sources": video_sources,
             "history": safe_history,
             "request_context": dict(request_context),
         }

@@ -386,6 +386,14 @@ class AgentSkillOrchestrationTests(unittest.TestCase):
         self.assertEqual(result["intent"], "skill_plan")
         self.assertEqual(result["data"]["completed_steps"], 1)
         self.assertEqual(planner.calls[0]["context"]["session_id"], "default")
+        self.assertEqual(
+            planner.calls[0]["context"]["video_sources"][0]["source_id"],
+            "main-monitor",
+        )
+        self.assertNotIn(
+            "stream",
+            planner.calls[0]["context"]["video_sources"][0],
+        )
 
     def test_deterministic_time_context_overrides_model_time_arguments(self) -> None:
         planner = StaticSkillPlanner(

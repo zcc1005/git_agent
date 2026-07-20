@@ -26,6 +26,7 @@ HELP_TEXT = (
     "我支持：检测这张图片、检测这段视频、查询上一轮结果、统计今天高风险报警次数、"
     "生成今日风险报告、确认报警、取消报警。还可通过 Skill 接口执行风险研判、"
     "按时间/风险/线路查询、人工复核和组合巡检任务。"
+    "还可检查已注册固定监控源的 RTSP 连接状态。"
 )
 MISSING_MEDIA_REPLY = "还没有看到图片/视频，发过来立刻帮你分析。"
 ATTACHMENT_LABELS = {"image": "图片", "video": "视频"}
@@ -472,6 +473,7 @@ class AgentService:
             "current_time": localized_time.isoformat(timespec="seconds"),
             "timezone": self.timezone_name,
             "temporal_resolution": temporal_resolution,
+            "video_sources": self.tools.video_source_catalog(),
             "history": self.store.list_messages(session_id, limit=12),
             "request_context": planning_request_context,
         }

@@ -1,0 +1,16 @@
+logLevel: info
+logDestinations: [file]
+logFile: mediamtx.log
+api: false
+metrics: false
+pprof: false
+playback: false
+rtsp: true
+rtspAddress: :8554
+rtmp: false
+hls: false
+webrtc: false
+srt: false
+moq: false
+paths:
+  all_others:

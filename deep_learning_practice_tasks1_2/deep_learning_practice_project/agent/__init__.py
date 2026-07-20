@@ -11,9 +11,11 @@ from .service import AgentService
 from .planners import SkillPlan, SkillPlanner, SkillPlanningError, SkillPlanStep
 from .skills import RuntimeSkill, SkillRegistry, SkillResult, SkillSpec
 from .tools import AgentTools, ImageDetectionOutcome, VideoDetectionOutcome
+from .streaming import RtspStreamProbe, StreamProbeResult
 from .video_sources import (
     LongVideoSource,
     LongVideoSourceRegistry,
+    RtspStreamSettings,
     VideoResolution,
     VideoSegment,
     VideoZone,
@@ -42,8 +44,11 @@ __all__ = [
     "SkillPlanStep",
     "LongVideoSource",
     "LongVideoSourceRegistry",
+    "RtspStreamSettings",
     "VideoResolution",
     "VideoSegment",
     "VideoZone",
     "load_video_source_registry",
+    "RtspStreamProbe",
+    "StreamProbeResult",
 ]

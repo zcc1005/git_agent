@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from pathlib import Path
+import re
 from typing import Any, Dict, Mapping
 
 from agent.tools import AgentTools
@@ -49,6 +50,7 @@ VIDEO_PARAMETERS = {
     "track_center_distance_ratio",
     "roi",
 }
+VIDEO_SOURCE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
 
 
 def _parameters(values: Dict[str, Any], allowed: set[str]) -> Dict[str, Any]:
@@ -236,6 +238,17 @@ def _validate_inspection(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     return _validate_image(values) if source_type == "image" else _validate_video(values)
 
 
+def _validate_probe_video_source(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    values = dict(arguments)
+    source_id = str(values.get("source_id") or "").strip().lower()
+    if not VIDEO_SOURCE_ID_PATTERN.fullmatch(source_id):
+        raise ValueError(
+            "source_id 只能包含小写字母、数字、下划线和连字符，且最长 128 个字符"
+        )
+    values["source_id"] = source_id
+    return values
+
+
 def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
     registry = SkillRegistry()
 
@@ -383,6 +396,21 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
             ),
             inspection_handler,
             _validate_inspection,
+        )
+    )
+    registry.register(
+        RuntimeSkill(
+            SkillSpec(
+                "probe-video-source",
+                (
+                    "检查已注册 RTSP 视频源是否在线，并读取一帧返回连接延迟、"
+                    "分辨率、FPS、编码格式和安全错误码；不执行异物检测。"
+                ),
+                required_inputs=("source_id",),
+                input_schema=ALL_SKILL_SCHEMAS["probe-video-source"],
+            ),
+            tools.probe_video_source,
+            _validate_probe_video_source,
         )
     )
     return registry

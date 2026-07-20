@@ -4,8 +4,14 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
+from agent.streaming import RtspStreamProbe, StreamProbeResult
+from agent.video_sources import (
+    LongVideoSource,
+    LongVideoSourceRegistry,
+    load_video_source_registry,
+)
 from project_config import OUTPUTS_DIR, PROJECT_ROOT, YOLO_MODEL_PATH
 from storage import AlarmRecord, SQLiteHistoryStore
 
@@ -36,6 +42,11 @@ VideoDetectionRunner = Callable[[Path, datetime, Dict[str, Any]], VideoDetection
 ImageDetectionRunner = Callable[[Path, Dict[str, Any]], ImageDetectionOutcome]
 AlarmControlHandler = Callable[[str, AlarmRecord], None]
 VideoSegmenter = Callable[[Path, float, Optional[float]], Path]
+StreamProbeRunner = Callable[
+    [LongVideoSource, Optional[Mapping[str, str]]],
+    StreamProbeResult,
+]
+VideoSourceRegistryLoader = Callable[[], LongVideoSourceRegistry]
 
 
 RISK_NAMES = {
@@ -88,6 +99,8 @@ class AgentTools:
         image_detection_runner: Optional[ImageDetectionRunner] = None,
         alarm_control_handler: Optional[AlarmControlHandler] = None,
         video_segmenter: Optional[VideoSegmenter] = None,
+        stream_probe_runner: Optional[StreamProbeRunner] = None,
+        video_source_registry_loader: Optional[VideoSourceRegistryLoader] = None,
         now: Optional[Callable[[], datetime]] = None,
     ) -> None:
         self.store = store
@@ -97,12 +110,132 @@ class AgentTools:
         )
         self._alarm_control_handler = alarm_control_handler
         self._video_segmenter = video_segmenter or self._extract_video_segment
+        self._stream_probe_runner = stream_probe_runner or RtspStreamProbe()
+        self._video_source_registry_loader = (
+            video_source_registry_loader or load_video_source_registry
+        )
         self._now = now or (lambda: datetime.now().astimezone())
 
     def current_time(self) -> datetime:
         """Return the clock used by tools so planning and execution share one time source."""
         current = self._now()
         return current if current.tzinfo is not None else current.astimezone()
+
+    def video_source_catalog(self) -> list[Dict[str, Any]]:
+        """Return planner-safe source aliases without URLs or environment names."""
+        try:
+            registry = self._video_source_registry_loader()
+        except (FileNotFoundError, ValueError):
+            return []
+        return [
+            {
+                "source_id": source.source_id,
+                "display_name": source.display_name,
+                "line_id": source.line_id,
+                "source_kind": source.source_kind,
+                "zones": [
+                    {
+                        "zone_id": zone.zone_id,
+                        "display_name": zone.display_name,
+                    }
+                    for zone in source.zones
+                ],
+            }
+            for source in registry.sources
+        ]
+
+    def probe_video_source(
+        self,
+        session_id: str,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        del session_id
+        source_id = str(context.get("source_id") or "").strip().lower()
+        try:
+            registry = self._video_source_registry_loader()
+        except FileNotFoundError:
+            return {
+                "ok": False,
+                "error_code": "configuration_error",
+                "reply": "视频源注册表尚未配置。",
+                "data": {"source_id": source_id, "online": False},
+            }
+        except ValueError:
+            return {
+                "ok": False,
+                "error_code": "configuration_error",
+                "reply": "视频源注册表配置无效。",
+                "data": {"source_id": source_id, "online": False},
+            }
+        try:
+            source = registry.get(source_id)
+        except LookupError:
+            return {
+                "ok": False,
+                "error_code": "source_not_found",
+                "reply": f"未找到已注册的视频源：{source_id}",
+                "data": {"source_id": source_id, "online": False},
+            }
+
+        if not source.is_rtsp:
+            return {
+                "ok": False,
+                "error_code": "not_rtsp_source",
+                "reply": f"{source.display_name}不是 RTSP 视频源，无法执行连接探测。",
+                "data": {
+                    "source_id": source.source_id,
+                    "display_name": source.display_name,
+                    "line_id": source.line_id,
+                    "online": False,
+                    "error_code": "not_rtsp_source",
+                },
+            }
+
+        try:
+            result = self._stream_probe_runner(source, None)
+            data = result.to_dict()
+        except Exception:
+            return {
+                "ok": False,
+                "error_code": "probe_failed",
+                "reply": f"{source.display_name}连接探测失败。",
+                "data": {
+                    "source_id": source.source_id,
+                    "display_name": source.display_name,
+                    "line_id": source.line_id,
+                    "online": False,
+                    "error_code": "probe_failed",
+                },
+            }
+
+        if result.error_code == "configuration_error":
+            return {
+                "ok": False,
+                "error_code": result.error_code,
+                "reply": result.error_message,
+                "data": data,
+            }
+        if result.online:
+            resolution = (
+                f"{result.width}×{result.height}"
+                if result.width and result.height
+                else "分辨率未知"
+            )
+            fps = f"{result.fps:g} FPS" if result.fps else "FPS 未知"
+            codec = result.codec.upper() if result.codec else "编码未知"
+            return {
+                "ok": True,
+                "reply": (
+                    f"{result.display_name}当前在线：{resolution}，{fps}，"
+                    f"{codec}，连接延迟 {result.latency_ms} 毫秒。"
+                ),
+                "data": data,
+            }
+        return {
+            "ok": True,
+            "reply": f"{result.display_name}当前离线：{result.error_message}",
+            "data": data,
+        }
 
     @staticmethod
     def video_event_frames(detection: Dict[str, Any]) -> list[Dict[str, Any]]:
