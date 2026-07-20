@@ -2,7 +2,10 @@
 
 Inputs:
 
-- `action`: `query` (default), `confirm`, or `cancel`.
+- `action`: closed enum `query` (default), `confirm`, or `cancel`.
+  - All read-only meanings such as view/show/get/status and 查看/查询/显示/获取/状态 must be serialized as `query`.
+  - The runtime may normalize `view`, `show`, `get`, and `status` to `query` only as a backward-compatible, read-only safeguard. Callers must not rely on those aliases.
+  - No alias is accepted for `confirm` or `cancel`; both require explicit operator intent.
 - `alarm_id`: optional explicit alarm identifier.
 - `line_id`: optional filter for queries.
 - `session_only`: restrict query to the invoking session when true.

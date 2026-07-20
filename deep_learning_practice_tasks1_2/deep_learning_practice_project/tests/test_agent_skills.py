@@ -75,8 +75,9 @@ class AgentSkillTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_catalog_exposes_closed_skill_set(self) -> None:
+        catalog = self.service.skill_catalog()
         self.assertEqual(
-            {item["name"] for item in self.service.skill_catalog()},
+            {item["name"] for item in catalog},
             {
                 "detect-image",
                 "detect-video",
@@ -89,8 +90,31 @@ class AgentSkillTests(unittest.TestCase):
                 "run-inspection-task",
             },
         )
+        alarm_spec = next(item for item in catalog if item["name"] == "control-alarm")
+        action_schema = alarm_spec["input_schema"]["properties"]["action"]
+        self.assertEqual(action_schema["enum"], ["query", "confirm", "cancel"])
+        self.assertEqual(action_schema["default"], "query")
+        self.assertEqual(action_schema["aliases"]["view"], "query")
         with self.assertRaises(LookupError):
             self.service.run_skill("arbitrary-python", arguments={})
+
+    def test_alarm_view_alias_is_a_safe_read_only_fallback(self) -> None:
+        result = self.service.run_skill(
+            "control-alarm",
+            session_id="operator",
+            arguments={"action": "view"},
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["data"]["found"])
+
+        invalid = self.service.run_skill(
+            "control-alarm",
+            session_id="operator",
+            arguments={"action": "delete"},
+        )
+        self.assertFalse(invalid["ok"])
+        self.assertEqual(invalid["error_code"], "invalid_arguments")
 
     def test_existing_database_is_migrated_without_losing_rows(self) -> None:
         legacy_path = self.root / "legacy.sqlite3"

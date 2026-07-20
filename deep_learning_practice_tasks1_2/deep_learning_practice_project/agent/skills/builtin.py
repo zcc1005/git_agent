@@ -11,6 +11,47 @@ from .base import RuntimeSkill, SkillRegistry, SkillSpec
 RISK_LEVELS = {"none", "low", "medium", "high"}
 SOURCE_TYPES = {"image", "video"}
 REVIEW_STATUSES = {"unreviewed", "confirmed", "rejected", "closed"}
+ALARM_ACTIONS = {"query", "confirm", "cancel"}
+ALARM_READ_ACTION_ALIASES = {
+    "view": "query",
+    "show": "query",
+    "get": "query",
+    "status": "query",
+}
+CONTROL_ALARM_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "action": {
+            "type": "string",
+            "enum": ["query", "confirm", "cancel"],
+            "default": "query",
+            "description": (
+                "报警操作。查看、查询、显示、获取当前报警或报警状态时必须传 query；"
+                "只有用户明确要求确认或取消时才能分别传 confirm 或 cancel。"
+            ),
+            "aliases": dict(ALARM_READ_ACTION_ALIASES),
+        },
+        "alarm_id": {
+            "type": "string",
+            "description": "可选的明确报警 ID；未提供时查询或操作当前报警。",
+        },
+        "line_id": {
+            "type": "string",
+            "description": "查询当前报警时使用的可选线路标识。",
+        },
+        "session_only": {
+            "type": "boolean",
+            "default": False,
+            "description": "为 true 时仅查询当前会话的报警。",
+        },
+        "note": {
+            "type": "string",
+            "description": "确认或取消报警时写入审计记录的可选操作说明。",
+        },
+    },
+    "required": [],
+    "additionalProperties": False,
+}
 IMAGE_PARAMETERS = {
     "conf",
     "known_conf",
@@ -105,8 +146,9 @@ def _validate_risk(arguments: Mapping[str, Any]) -> Dict[str, Any]:
 
 def _validate_alarm(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     values = dict(arguments)
-    action = str(values.get("action") or "query").lower()
-    if action not in {"query", "confirm", "cancel"}:
+    action = str(values.get("action") or "query").strip().lower()
+    action = ALARM_READ_ACTION_ALIASES.get(action, action)
+    if action not in ALARM_ACTIONS:
         raise ValueError("action 只能是 query、confirm 或 cancel")
     values["action"] = action
     return values
@@ -223,9 +265,13 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
         RuntimeSkill(
             SkillSpec(
                 "control-alarm",
-                "查看、确认或取消当前报警，并记录操作审计。",
+                (
+                    "查看、确认或取消当前报警，并记录操作审计。查看、查询、显示或获取"
+                    "报警状态时 action 必须为 query；confirm/cancel 仅用于用户明确要求的写操作。"
+                ),
                 optional_inputs=("action", "alarm_id", "line_id", "session_only", "note"),
                 safety="controlled-write",
+                input_schema=CONTROL_ALARM_INPUT_SCHEMA,
             ),
             alarm_handler,
             _validate_alarm,

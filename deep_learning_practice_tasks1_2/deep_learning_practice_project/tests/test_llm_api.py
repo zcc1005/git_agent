@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from agent import AgentService, AgentTools, ImageDetectionOutcome
 from agent.llm_api import (
+    LLMAPIError,
     LLMAPIConfig,
     OpenAICompatibleClient,
     OpenAICompatibleSkillPlanner,
@@ -120,6 +121,75 @@ class OpenAICompatiblePlannerTests(unittest.TestCase):
         self.assertEqual(
             calls[0]["payload"]["response_format"], {"type": "json_object"}
         )
+
+    def test_alarm_view_is_normalized_by_the_declared_skill_schema(self) -> None:
+        def transport(url, body, headers, timeout):
+            del url, body, headers, timeout
+            plan = {
+                "summary": "查看当前报警",
+                "needs_clarification": False,
+                "steps": [
+                    {"skill_name": "control-alarm", "arguments": {"action": "view"}}
+                ],
+            }
+            return {"choices": [{"message": {"content": json.dumps(plan)}}]}
+
+        planner = OpenAICompatibleSkillPlanner(
+            OpenAICompatibleClient(
+                LLMAPIConfig("secret", "https://example.test/v1", "planner"),
+                transport=transport,
+            )
+        )
+        catalog = [
+            {
+                "name": "control-alarm",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["query", "confirm", "cancel"],
+                            "default": "query",
+                            "aliases": {"view": "query"},
+                        }
+                    },
+                    "additionalProperties": False,
+                },
+            }
+        ]
+
+        plan = planner.plan(
+            "查看报警",
+            catalog=catalog,
+            context={"session_id": "s1", "history": [], "request_context": {}},
+        )
+
+        self.assertEqual(plan.steps[0].arguments["action"], "query")
+
+    def test_alarm_action_outside_enum_is_rejected_before_execution(self) -> None:
+        payload = {
+            "steps": [
+                {"skill_name": "control-alarm", "arguments": {"action": "delete"}}
+            ]
+        }
+        catalog = [
+            {
+                "name": "control-alarm",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["query", "confirm", "cancel"],
+                        }
+                    },
+                    "additionalProperties": False,
+                },
+            }
+        ]
+
+        with self.assertRaisesRegex(LLMAPIError, "只能是"):
+            OpenAICompatibleSkillPlanner._parse_plan(payload, catalog=catalog)
 
     def test_env_factory_links_model_planner_to_agent_service(self) -> None:
         def transport(url, body, headers, timeout):

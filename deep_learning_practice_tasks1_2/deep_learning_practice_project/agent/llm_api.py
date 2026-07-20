@@ -210,6 +210,8 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
             "只可使用提供的封闭 Skill catalog，最多返回 6 个步骤。检测 Skill 已包含确定性风险"
             "研判、历史入库和报警创建，不要重复调用 assess-risk。\n"
             "报警 confirm/cancel 及 review-detection 写操作只有在用户明确要求时才能规划。"
+            "control-alarm.action 只能输出 query、confirm、cancel；查看、查询、显示、获取报警状态"
+            "一律输出 query，禁止输出 view、show、get、status。"
             "缺少媒体路径、时间范围对应的实际文件或关键参数时，设置 needs_clarification=true。\n"
             "后续步骤可用 $steps.0.data.detection_id 形式引用前一步结果。\n"
             "严格返回 JSON 对象，结构为："
@@ -232,7 +234,7 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
                 {"role": "user", "content": user_prompt},
             ]
         )
-        return self._parse_plan(payload)
+        return self._parse_plan(payload, catalog=catalog)
 
     @staticmethod
     def _safe_context(context: Mapping[str, Any]) -> Dict[str, Any]:
@@ -255,11 +257,21 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
             "request_context": dict(request_context),
         }
 
-    @staticmethod
-    def _parse_plan(payload: Mapping[str, Any]) -> SkillPlan:
+    @classmethod
+    def _parse_plan(
+        cls,
+        payload: Mapping[str, Any],
+        *,
+        catalog: Sequence[Mapping[str, Any]] = (),
+    ) -> SkillPlan:
         raw_steps = payload.get("steps") or []
         if not isinstance(raw_steps, list):
             raise LLMAPIError("模型计划中的 steps 必须是数组")
+        catalog_by_name = {
+            str(item.get("name") or ""): item
+            for item in catalog
+            if isinstance(item, Mapping) and item.get("name")
+        }
         steps = []
         for raw_step in raw_steps:
             if not isinstance(raw_step, Mapping):
@@ -270,13 +282,80 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
                 raise LLMAPIError("Skill 步骤缺少 skill_name")
             if not isinstance(arguments, Mapping):
                 raise LLMAPIError("Skill arguments 必须是对象")
-            steps.append(SkillPlanStep(skill_name, dict(arguments)))
+            normalized_arguments = cls._normalize_arguments(
+                skill_name,
+                arguments,
+                catalog_by_name.get(skill_name),
+            )
+            steps.append(SkillPlanStep(skill_name, normalized_arguments))
         return SkillPlan(
             steps=tuple(steps),
             needs_clarification=bool(payload.get("needs_clarification")),
             clarification=str(payload.get("clarification") or ""),
             summary=str(payload.get("summary") or ""),
         )
+
+    @staticmethod
+    def _normalize_arguments(
+        skill_name: str,
+        arguments: Mapping[str, Any],
+        skill_spec: Optional[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        normalized = dict(arguments)
+        if not isinstance(skill_spec, Mapping):
+            return normalized
+        input_schema = skill_spec.get("input_schema")
+        if not isinstance(input_schema, Mapping):
+            return normalized
+        properties = input_schema.get("properties") or {}
+        if not isinstance(properties, Mapping):
+            raise LLMAPIError(f"Skill {skill_name} 的 input_schema.properties 必须是对象")
+
+        if input_schema.get("additionalProperties") is False:
+            unknown = sorted(set(normalized) - set(properties))
+            if unknown:
+                raise LLMAPIError(
+                    f"Skill {skill_name} 包含协议外参数：{', '.join(unknown)}"
+                )
+
+        for parameter_name, raw_schema in properties.items():
+            if not isinstance(raw_schema, Mapping):
+                continue
+            if parameter_name not in normalized:
+                if "default" in raw_schema:
+                    normalized[parameter_name] = raw_schema["default"]
+                continue
+
+            value = normalized[parameter_name]
+            aliases = raw_schema.get("aliases") or {}
+            if isinstance(value, str) and isinstance(aliases, Mapping):
+                alias_key = value.strip().lower()
+                if alias_key in aliases:
+                    value = aliases[alias_key]
+                    normalized[parameter_name] = value
+
+            allowed_values = raw_schema.get("enum")
+            if isinstance(allowed_values, (list, tuple)) and value not in allowed_values:
+                choices = ", ".join(str(item) for item in allowed_values)
+                raise LLMAPIError(
+                    f"Skill {skill_name}.{parameter_name} 只能是：{choices}"
+                )
+
+            expected_type = raw_schema.get("type")
+            type_checks = {
+                "string": lambda item: isinstance(item, str),
+                "boolean": lambda item: isinstance(item, bool),
+                "integer": lambda item: isinstance(item, int) and not isinstance(item, bool),
+                "number": lambda item: isinstance(item, (int, float)) and not isinstance(item, bool),
+                "object": lambda item: isinstance(item, Mapping),
+                "array": lambda item: isinstance(item, (list, tuple)),
+            }
+            checker = type_checks.get(str(expected_type or ""))
+            if checker is not None and not checker(value):
+                raise LLMAPIError(
+                    f"Skill {skill_name}.{parameter_name} 必须是 {expected_type} 类型"
+                )
+        return normalized
 
 
 def create_llm_enabled_service(

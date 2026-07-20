@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
@@ -16,19 +17,23 @@ class SkillSpec:
     required_inputs: Tuple[str, ...] = ()
     optional_inputs: Tuple[str, ...] = ()
     safety: str = "read"
+    input_schema: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def allowed_inputs(self) -> set[str]:
         return set(self.required_inputs) | set(self.optional_inputs)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "name": self.name,
             "description": self.description,
             "required_inputs": list(self.required_inputs),
             "optional_inputs": list(self.optional_inputs),
             "safety": self.safety,
         }
+        if self.input_schema:
+            result["input_schema"] = deepcopy(dict(self.input_schema))
+        return result
 
 
 @dataclass(frozen=True)

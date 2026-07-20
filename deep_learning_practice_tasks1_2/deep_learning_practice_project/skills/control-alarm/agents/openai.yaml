@@ -1,4 +1,4 @@
 interface:
   display_name: "报警控制"
-  short_description: "安全查看、确认或取消当前报警并保留完整操作审计记录"
-  default_prompt: "Use $control-alarm to view or explicitly update the current alarm."
+  short_description: "安全查询、确认或取消当前报警，并保留完整操作审计记录"
+  default_prompt: "Use $control-alarm with action=query to view alarm state, or with an explicit confirm/cancel action to update it."
