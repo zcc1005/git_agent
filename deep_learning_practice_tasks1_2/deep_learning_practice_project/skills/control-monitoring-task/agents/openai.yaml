@@ -1,0 +1,4 @@
+interface:
+  display_name: "管理监控任务"
+  short_description: "查询状态或安全停止当前会话的有限时段 RTSP 监控任务"
+  default_prompt: "使用 $control-monitoring-task 查看当前监控任务状态或明确停止一个任务。"
