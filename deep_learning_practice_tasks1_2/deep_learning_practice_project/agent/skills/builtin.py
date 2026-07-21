@@ -249,6 +249,16 @@ def _validate_probe_video_source(arguments: Mapping[str, Any]) -> Dict[str, Any]
     return values
 
 
+def _validate_capture_video_source(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    values = _validate_probe_video_source(arguments)
+    if values.get("duration_seconds") is not None:
+        duration = float(values["duration_seconds"])
+        if not 1 <= duration <= 3600:
+            raise ValueError("duration_seconds 必须在 1 到 3600 之间")
+        values["duration_seconds"] = duration
+    return values
+
+
 def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
     registry = SkillRegistry()
 
@@ -411,6 +421,23 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
             ),
             tools.probe_video_source,
             _validate_probe_video_source,
+        )
+    )
+    registry.register(
+        RuntimeSkill(
+            SkillSpec(
+                "capture-video-source",
+                (
+                    "从已注册 RTSP 视频源采集一个定长本地 MP4 片段并返回真实起止时间、"
+                    "帧数和安全元数据；不执行异物检测。"
+                ),
+                required_inputs=("source_id",),
+                optional_inputs=("duration_seconds",),
+                safety="local-write",
+                input_schema=ALL_SKILL_SCHEMAS["capture-video-source"],
+            ),
+            tools.capture_video_source,
+            _validate_capture_video_source,
         )
     )
     return registry

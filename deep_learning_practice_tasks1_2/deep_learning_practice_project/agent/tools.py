@@ -6,7 +6,12 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional
 
-from agent.streaming import RtspStreamProbe, StreamProbeResult
+from agent.streaming import (
+    RtspStreamCapture,
+    RtspStreamProbe,
+    StreamCaptureResult,
+    StreamProbeResult,
+)
 from agent.video_sources import (
     LongVideoSource,
     LongVideoSourceRegistry,
@@ -45,6 +50,10 @@ VideoSegmenter = Callable[[Path, float, Optional[float]], Path]
 StreamProbeRunner = Callable[
     [LongVideoSource, Optional[Mapping[str, str]]],
     StreamProbeResult,
+]
+StreamCaptureRunner = Callable[
+    [LongVideoSource, Optional[float], Optional[Mapping[str, str]]],
+    StreamCaptureResult,
 ]
 VideoSourceRegistryLoader = Callable[[], LongVideoSourceRegistry]
 
@@ -100,6 +109,7 @@ class AgentTools:
         alarm_control_handler: Optional[AlarmControlHandler] = None,
         video_segmenter: Optional[VideoSegmenter] = None,
         stream_probe_runner: Optional[StreamProbeRunner] = None,
+        stream_capture_runner: Optional[StreamCaptureRunner] = None,
         video_source_registry_loader: Optional[VideoSourceRegistryLoader] = None,
         now: Optional[Callable[[], datetime]] = None,
     ) -> None:
@@ -111,6 +121,7 @@ class AgentTools:
         self._alarm_control_handler = alarm_control_handler
         self._video_segmenter = video_segmenter or self._extract_video_segment
         self._stream_probe_runner = stream_probe_runner or RtspStreamProbe()
+        self._stream_capture_runner = stream_capture_runner or RtspStreamCapture()
         self._video_source_registry_loader = (
             video_source_registry_loader or load_video_source_registry
         )
@@ -133,6 +144,9 @@ class AgentTools:
                 "display_name": source.display_name,
                 "line_id": source.line_id,
                 "source_kind": source.source_kind,
+                "default_capture_seconds": (
+                    source.stream.capture_window_seconds if source.stream else None
+                ),
                 "zones": [
                     {
                         "zone_id": zone.zone_id,
@@ -234,6 +248,86 @@ class AgentTools:
         return {
             "ok": True,
             "reply": f"{result.display_name}当前离线：{result.error_message}",
+            "data": data,
+        }
+
+    def capture_video_source(
+        self,
+        session_id: str,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        del session_id
+        source_id = str(context.get("source_id") or "").strip().lower()
+        try:
+            registry = self._video_source_registry_loader()
+        except (FileNotFoundError, ValueError):
+            return {
+                "ok": False,
+                "error_code": "configuration_error",
+                "reply": "视频源注册表尚未正确配置。",
+                "data": {"source_id": source_id, "captured": False},
+            }
+        try:
+            source = registry.get(source_id)
+        except LookupError:
+            return {
+                "ok": False,
+                "error_code": "source_not_found",
+                "reply": f"未找到已注册的视频源：{source_id}",
+                "data": {"source_id": source_id, "captured": False},
+            }
+        if not source.is_rtsp:
+            return {
+                "ok": False,
+                "error_code": "not_rtsp_source",
+                "reply": f"{source.display_name}不是 RTSP 视频源，无法执行实时采集。",
+                "data": {
+                    "source_id": source.source_id,
+                    "display_name": source.display_name,
+                    "line_id": source.line_id,
+                    "captured": False,
+                    "error_code": "not_rtsp_source",
+                },
+            }
+
+        duration = context.get("duration_seconds")
+        try:
+            result = self._stream_capture_runner(
+                source,
+                float(duration) if duration is not None else None,
+                None,
+            )
+            data = result.to_dict()
+        except Exception:
+            return {
+                "ok": False,
+                "error_code": "capture_failed",
+                "reply": f"{source.display_name}视频采集失败。",
+                "data": {
+                    "source_id": source.source_id,
+                    "display_name": source.display_name,
+                    "line_id": source.line_id,
+                    "captured": False,
+                    "error_code": "capture_failed",
+                },
+            }
+
+        for path_key in ("video_path", "metadata_path"):
+            if data.get(path_key):
+                data[path_key] = self._display_path(Path(str(data[path_key])))
+        if not result.captured:
+            return {
+                "ok": False,
+                "error_code": result.error_code,
+                "reply": f"{result.display_name}视频采集失败：{result.error_message}",
+                "data": data,
+            }
+        return {
+            "ok": True,
+            "reply": (
+                f"已从{result.display_name}采集 {result.duration_seconds:g} 秒视频，"
+                f"共 {result.frame_count} 帧。"
+            ),
             "data": data,
         }
 

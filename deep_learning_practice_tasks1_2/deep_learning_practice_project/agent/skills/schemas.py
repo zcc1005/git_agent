@@ -336,6 +336,21 @@ PROBE_VIDEO_SOURCE_SCHEMA = _object(
     required=("source_id",),
 )
 
+CAPTURE_VIDEO_SOURCE_SCHEMA = _object(
+    {
+        "source_id": deepcopy(PROBE_VIDEO_SOURCE_SCHEMA["properties"]["source_id"]),
+        "duration_seconds": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 3600,
+            "description": (
+                "本次实时采集时长（秒）；省略时使用视频源配置中的 capture_window_seconds。"
+            ),
+        },
+    },
+    required=("source_id",),
+)
+
 
 ALL_SKILL_SCHEMAS = {
     "detect-image": DETECT_IMAGE_SCHEMA,
@@ -348,4 +363,5 @@ ALL_SKILL_SCHEMAS = {
     "review-detection": REVIEW_DETECTION_SCHEMA,
     "run-inspection-task": RUN_INSPECTION_SCHEMA,
     "probe-video-source": PROBE_VIDEO_SOURCE_SCHEMA,
+    "capture-video-source": CAPTURE_VIDEO_SOURCE_SCHEMA,
 }

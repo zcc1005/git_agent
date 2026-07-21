@@ -66,3 +66,16 @@ service.run_skill(
 ```
 
 该操作只连接视频源并读取一帧，返回分辨率、FPS、编码、后端和连接延迟；不会运行 YOLO、创建检测历史或触发报警。调用方不能传入 RTSP URL、账号密码、传输协议或超时覆盖值。
+
+## 定长片段采集
+
+第四阶段提供 `capture-video-source`，把已注册 RTSP 源录制为本地 MP4：
+
+```python
+service.run_skill(
+    "capture-video-source",
+    arguments={"source_id": "main-monitor", "duration_seconds": 30},
+)
+```
+
+省略 `duration_seconds` 时使用 `stream.capture_window_seconds`。执行层自行生成输出路径和安全 JSON 元数据，异常时清理半成品。该 Skill 只采集视频，不运行 YOLO、不写检测历史、不创建报警，也不启动循环监控。

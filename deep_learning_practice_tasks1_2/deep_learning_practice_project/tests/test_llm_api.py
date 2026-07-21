@@ -390,6 +390,10 @@ class AgentSkillOrchestrationTests(unittest.TestCase):
             planner.calls[0]["context"]["video_sources"][0]["source_id"],
             "main-monitor",
         )
+        self.assertEqual(
+            planner.calls[0]["context"]["video_sources"][0]["default_capture_seconds"],
+            60,
+        )
         self.assertNotIn(
             "stream",
             planner.calls[0]["context"]["video_sources"][0],

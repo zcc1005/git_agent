@@ -11,6 +11,7 @@ from agent import (
     AgentTools,
     ImageDetectionOutcome,
     LongVideoSourceRegistry,
+    StreamCaptureResult,
     StreamProbeResult,
     VideoDetectionOutcome,
 )
@@ -31,6 +32,7 @@ class AgentSkillTests(unittest.TestCase):
         self.image_calls = []
         self.segment_calls = []
         self.probe_calls = []
+        self.capture_calls = []
 
         def video_runner(video_path, video_start, parameters):
             self.video_calls.append((video_path, video_start, parameters))
@@ -117,12 +119,36 @@ class AgentSkillTests(unittest.TestCase):
                 transport="tcp",
             )
 
+        def stream_capture_runner(source, duration_seconds, environment):
+            self.capture_calls.append((source, duration_seconds, environment))
+            return StreamCaptureResult(
+                source_id=source.source_id,
+                display_name=source.display_name,
+                line_id=source.line_id,
+                captured=True,
+                requested_duration_seconds=duration_seconds or 60.0,
+                started_at=FIXED_NOW.isoformat(),
+                ended_at=FIXED_NOW.isoformat(),
+                duration_seconds=3.0,
+                frame_count=75,
+                width=640,
+                height=360,
+                fps=25.0,
+                source_codec="h264",
+                output_codec="mp4v",
+                backend="FFMPEG",
+                transport="tcp",
+                video_path=str(self.root / "capture.mp4"),
+                metadata_path=str(self.root / "capture.json"),
+            )
+
         tools = AgentTools(
             self.store,
             detection_runner=video_runner,
             image_detection_runner=image_runner,
             video_segmenter=video_segmenter,
             stream_probe_runner=stream_probe_runner,
+            stream_capture_runner=stream_capture_runner,
             video_source_registry_loader=lambda: source_registry,
             now=lambda: FIXED_NOW,
         )
@@ -150,6 +176,7 @@ class AgentSkillTests(unittest.TestCase):
                 "review-detection",
                 "run-inspection-task",
                 "probe-video-source",
+                "capture-video-source",
             },
         )
         alarm_spec = next(item for item in catalog if item["name"] == "control-alarm")
@@ -188,6 +215,33 @@ class AgentSkillTests(unittest.TestCase):
         ):
             invalid = self.service.run_skill(
                 "probe-video-source",
+                arguments=arguments,
+            )
+            self.assertFalse(invalid["ok"])
+            self.assertEqual(invalid["error_code"], "invalid_arguments")
+
+    def test_capture_video_source_uses_registered_source_and_bounded_duration(self) -> None:
+        result = self.service.run_skill(
+            "capture-video-source",
+            session_id="operator",
+            arguments={"source_id": "main-monitor", "duration_seconds": 3},
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["data"]["captured"])
+        self.assertEqual(result["data"]["frame_count"], 75)
+        self.assertEqual(self.capture_calls[0][0].source_id, "main-monitor")
+        self.assertEqual(self.capture_calls[0][1], 3.0)
+        self.assertIsNone(self.capture_calls[0][2])
+
+        for arguments in (
+            {"source_id": "main-monitor", "duration_seconds": 0},
+            {"source_id": "main-monitor", "duration_seconds": 3601},
+            {"source_id": "main-monitor", "output_path": "capture.mp4"},
+            {"source_id": "main-monitor", "rtsp_url": "rtsp://camera/live"},
+        ):
+            invalid = self.service.run_skill(
+                "capture-video-source",
                 arguments=arguments,
             )
             self.assertFalse(invalid["ok"])

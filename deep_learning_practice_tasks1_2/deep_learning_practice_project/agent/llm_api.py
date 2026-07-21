@@ -218,6 +218,8 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
             "probe-video-source，并传 source_id；不得自行判断在线状态，也不得把 RTSP URL 作为参数。"
             "必须依据 context.video_sources 将显示名称、线路和区域映射到 source_id；找不到唯一映射时"
             "要求澄清，禁止猜测 source_id。"
+            "用户明确要求录制、采集或截取已注册监控的一段实时视频时，调用 capture-video-source；"
+            "duration_seconds 必须是秒数，省略时使用视频源默认值。该 Skill 只采集、不代表已经检测。"
             "严格遵守每个 Skill 的 input_schema；枚举只输出规范值，数值、布尔值和数组不得写成字符串。"
             "context 明确提供 current_date、current_time、timezone 和 deterministic temporal_resolution。"
             "涉及时间时必须原样使用 temporal_resolution，禁止自行重新计算。绝对区间使用 start_time/end_time，"
@@ -333,6 +335,7 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
                     "display_name": str(item.get("display_name") or ""),
                     "line_id": str(item.get("line_id") or ""),
                     "source_kind": str(item.get("source_kind") or ""),
+                    "default_capture_seconds": item.get("default_capture_seconds"),
                     "zones": zones,
                 }
             )
