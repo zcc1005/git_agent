@@ -79,3 +79,21 @@ service.run_skill(
 ```
 
 省略 `duration_seconds` 时使用 `stream.capture_window_seconds`。执行层自行生成输出路径和安全 JSON 元数据，异常时清理半成品。该 Skill 只采集视频，不运行 YOLO、不写检测历史、不创建报警，也不启动循环监控。
+
+## RTSP 单次检测
+
+第五阶段提供 `detect-video-source`，将实时采集片段交给现有视频检测链路：
+
+```python
+service.run_skill(
+    "detect-video-source",
+    arguments={
+        "source_id": "main-monitor",
+        "duration_seconds": 30,
+        "zone_id": "belt-zone-a",
+        "parameters": {"sample_fps": 4.0, "conf": 0.25, "known_conf": 0.40}
+    },
+)
+```
+
+执行顺序为：注册源与区域解析 → RTSP 定长采集 → 现有 `detect-video` → 风险研判 → 报警报告 → SQLite 历史入库。`zone_id` 与手工 `parameters.roi` 互斥；线路始终来自视频源注册表，模型不能覆盖。该阶段仍是按需单次检测，不包含常驻循环、定时调度或历史录像索引。

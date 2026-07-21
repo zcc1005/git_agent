@@ -351,6 +351,27 @@ CAPTURE_VIDEO_SOURCE_SCHEMA = _object(
     required=("source_id",),
 )
 
+DETECT_VIDEO_SOURCE_SCHEMA = _object(
+    {
+        "source_id": deepcopy(PROBE_VIDEO_SOURCE_SCHEMA["properties"]["source_id"]),
+        "duration_seconds": deepcopy(
+            CAPTURE_VIDEO_SOURCE_SCHEMA["properties"]["duration_seconds"]
+        ),
+        "zone_id": {
+            **_string(
+                "视频源注册表中的区域标识；执行层将其确定性转换为 ROI。",
+                max_length=128,
+            ),
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+        },
+        "parameters": {
+            **deepcopy(VIDEO_PARAMETERS_SCHEMA),
+            "description": "交给现有视频检测链路的严格参数。",
+        },
+    },
+    required=("source_id",),
+)
+
 
 ALL_SKILL_SCHEMAS = {
     "detect-image": DETECT_IMAGE_SCHEMA,
@@ -364,4 +385,5 @@ ALL_SKILL_SCHEMAS = {
     "run-inspection-task": RUN_INSPECTION_SCHEMA,
     "probe-video-source": PROBE_VIDEO_SOURCE_SCHEMA,
     "capture-video-source": CAPTURE_VIDEO_SOURCE_SCHEMA,
+    "detect-video-source": DETECT_VIDEO_SOURCE_SCHEMA,
 }

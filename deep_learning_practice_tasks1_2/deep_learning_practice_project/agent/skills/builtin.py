@@ -259,6 +259,23 @@ def _validate_capture_video_source(arguments: Mapping[str, Any]) -> Dict[str, An
     return values
 
 
+def _validate_detect_video_source(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    values = _validate_capture_video_source(arguments)
+    zone_id = str(values.get("zone_id") or "").strip().lower()
+    if zone_id and not VIDEO_SOURCE_ID_PATTERN.fullmatch(zone_id):
+        raise ValueError(
+            "zone_id 只能包含小写字母、数字、下划线和连字符，且最长 128 个字符"
+        )
+    parameters = values.get("parameters") or {}
+    if zone_id and parameters.get("roi") is not None:
+        raise ValueError("zone_id 与 parameters.roi 只能提供一个")
+    validated_parameters = _validate_video({"parameters": parameters})["parameters"]
+    values["parameters"] = validated_parameters
+    if zone_id:
+        values["zone_id"] = zone_id
+    return values
+
+
 def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
     registry = SkillRegistry()
 
@@ -438,6 +455,23 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
             ),
             tools.capture_video_source,
             _validate_capture_video_source,
+        )
+    )
+    registry.register(
+        RuntimeSkill(
+            SkillSpec(
+                "detect-video-source",
+                (
+                    "按需采集已注册 RTSP 视频源并调用现有视频检测、风险研判、报警报告"
+                    "和历史入库；可通过 zone_id 使用已注册 ROI。"
+                ),
+                required_inputs=("source_id",),
+                optional_inputs=("duration_seconds", "zone_id", "parameters"),
+                safety="local-write",
+                input_schema=ALL_SKILL_SCHEMAS["detect-video-source"],
+            ),
+            tools.detect_video_source,
+            _validate_detect_video_source,
         )
     )
     return registry

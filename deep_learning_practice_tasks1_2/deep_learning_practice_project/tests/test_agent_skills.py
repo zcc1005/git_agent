@@ -44,7 +44,12 @@ class AgentSkillTests(unittest.TestCase):
                 "duration_seconds": 1800,
                 "num_events": 1,
                 "class_counts": {"石块异物": 1},
-                "events": [{"event_id": 1}],
+                "events": [
+                    {
+                        "event_id": 1,
+                        "key_frame": "outputs/test-event-frame.jpg",
+                    }
+                ],
             }
             alarm = {
                 "report_id": f"alarm-{video_path.stem}",
@@ -88,7 +93,13 @@ class AgentSkillTests(unittest.TestCase):
                         "video_path": "",
                         "started_at": None,
                         "line_id": "main-line",
-                        "zones": [],
+                        "zones": [
+                            {
+                                "zone_id": "belt-zone-a",
+                                "display_name": "皮带A区",
+                                "roi": [10, 20, 300, 320],
+                            }
+                        ],
                         "manifest_path": "",
                         "resolution": None,
                         "duration_seconds": None,
@@ -121,6 +132,10 @@ class AgentSkillTests(unittest.TestCase):
 
         def stream_capture_runner(source, duration_seconds, environment):
             self.capture_calls.append((source, duration_seconds, environment))
+            capture_path = self.root / "capture.mp4"
+            metadata_path = self.root / "capture.json"
+            capture_path.write_bytes(b"capture")
+            metadata_path.write_text("{}", encoding="utf-8")
             return StreamCaptureResult(
                 source_id=source.source_id,
                 display_name=source.display_name,
@@ -138,8 +153,8 @@ class AgentSkillTests(unittest.TestCase):
                 output_codec="mp4v",
                 backend="FFMPEG",
                 transport="tcp",
-                video_path=str(self.root / "capture.mp4"),
-                metadata_path=str(self.root / "capture.json"),
+                video_path=str(capture_path),
+                metadata_path=str(metadata_path),
             )
 
         tools = AgentTools(
@@ -177,6 +192,7 @@ class AgentSkillTests(unittest.TestCase):
                 "run-inspection-task",
                 "probe-video-source",
                 "capture-video-source",
+                "detect-video-source",
             },
         )
         alarm_spec = next(item for item in catalog if item["name"] == "control-alarm")
@@ -246,6 +262,71 @@ class AgentSkillTests(unittest.TestCase):
             )
             self.assertFalse(invalid["ok"])
             self.assertEqual(invalid["error_code"], "invalid_arguments")
+
+    def test_detect_video_source_runs_capture_detection_risk_and_history_workflow(self) -> None:
+        result = self.service.run_skill(
+            "detect-video-source",
+            session_id="operator",
+            arguments={
+                "source_id": "main-monitor",
+                "duration_seconds": 3,
+                "zone_id": "belt-zone-a",
+                "parameters": {
+                    "sample_fps": 2.0,
+                    "conf": 0.2,
+                    "known_conf": 0.5,
+                },
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["data"]["source_id"], "main-monitor")
+        self.assertEqual(result["data"]["line_id"], "main-line")
+        self.assertEqual(result["data"]["zone"]["zone_id"], "belt-zone-a")
+        self.assertEqual(result["data"]["zone"]["roi"], [10, 20, 300, 320])
+        self.assertEqual(result["data"]["capture"]["frame_count"], 75)
+        self.assertEqual(result["data"]["alarm_report"], "视频报警报告")
+        self.assertEqual(
+            result["data"]["event_frames"],
+            [{"event_id": 1, "key_frame": "outputs/test-event-frame.jpg"}],
+        )
+        self.assertEqual(
+            result["data"]["workflow"],
+            [
+                "capture-video-source",
+                "detect-video",
+                "assess-risk",
+                "persist-history",
+                "create-alarm",
+            ],
+        )
+        self.assertEqual(self.video_calls[-1][0], self.root / "capture.mp4")
+        self.assertEqual(self.video_calls[-1][1], FIXED_NOW)
+        self.assertEqual(self.video_calls[-1][2]["sample_fps"], 2.0)
+        self.assertEqual(self.video_calls[-1][2]["roi"], (10, 20, 300, 320))
+        record = self.store.latest_detection("operator")
+        self.assertEqual(record.line_id, "main-line")
+        self.assertEqual(record.source_started_at, FIXED_NOW.isoformat())
+
+    def test_detect_video_source_rejects_unknown_zone_and_conflicting_roi(self) -> None:
+        unknown_zone = self.service.run_skill(
+            "detect-video-source",
+            arguments={"source_id": "main-monitor", "zone_id": "missing-zone"},
+        )
+        conflicting_roi = self.service.run_skill(
+            "detect-video-source",
+            arguments={
+                "source_id": "main-monitor",
+                "zone_id": "belt-zone-a",
+                "parameters": {"roi": [0, 0, 100, 100]},
+            },
+        )
+
+        self.assertFalse(unknown_zone["ok"])
+        self.assertEqual(unknown_zone["error_code"], "zone_not_found")
+        self.assertEqual(unknown_zone["data"]["available_zones"], ["belt-zone-a"])
+        self.assertFalse(conflicting_roi["ok"])
+        self.assertEqual(conflicting_roi["error_code"], "invalid_arguments")
 
     def test_alarm_view_alias_is_a_safe_read_only_fallback(self) -> None:
         result = self.service.run_skill(

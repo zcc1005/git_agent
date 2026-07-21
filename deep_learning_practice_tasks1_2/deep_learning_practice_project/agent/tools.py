@@ -331,6 +331,154 @@ class AgentTools:
             "data": data,
         }
 
+    def detect_video_source(
+        self,
+        session_id: str,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        source_id = str(context.get("source_id") or "").strip().lower()
+        try:
+            registry = self._video_source_registry_loader()
+        except (FileNotFoundError, ValueError):
+            return {
+                "ok": False,
+                "error_code": "configuration_error",
+                "reply": "视频源注册表尚未正确配置。",
+                "data": {"source_id": source_id, "workflow": []},
+            }
+        try:
+            source = registry.get(source_id)
+        except LookupError:
+            return {
+                "ok": False,
+                "error_code": "source_not_found",
+                "reply": f"未找到已注册的视频源：{source_id}",
+                "data": {"source_id": source_id, "workflow": []},
+            }
+        if not source.is_rtsp:
+            return {
+                "ok": False,
+                "error_code": "not_rtsp_source",
+                "reply": f"{source.display_name}不是 RTSP 视频源，无法执行实时检测。",
+                "data": {
+                    "source_id": source.source_id,
+                    "display_name": source.display_name,
+                    "line_id": source.line_id,
+                    "workflow": [],
+                },
+            }
+
+        parameters = dict(context.get("parameters") or {})
+        zone_id = str(context.get("zone_id") or "").strip().lower()
+        selected_zone: Dict[str, Any] = {}
+        if zone_id:
+            zone = next((item for item in source.zones if item.zone_id == zone_id), None)
+            if zone is None:
+                return {
+                    "ok": False,
+                    "error_code": "zone_not_found",
+                    "reply": f"视频源 {source.display_name} 未注册区域：{zone_id}",
+                    "data": {
+                        "source_id": source.source_id,
+                        "display_name": source.display_name,
+                        "line_id": source.line_id,
+                        "zone_id": zone_id,
+                        "available_zones": [item.zone_id for item in source.zones],
+                        "workflow": [],
+                    },
+                }
+            parameters["roi"] = zone.roi
+            selected_zone = {
+                "zone_id": zone.zone_id,
+                "display_name": zone.display_name,
+                "roi": list(zone.roi),
+            }
+
+        capture_arguments: Dict[str, Any] = {"source_id": source.source_id}
+        if context.get("duration_seconds") is not None:
+            capture_arguments["duration_seconds"] = context["duration_seconds"]
+        capture_result = self.capture_video_source(session_id, capture_arguments)
+        capture_data = dict(capture_result.get("data") or {})
+        if not capture_result.get("ok"):
+            return {
+                "ok": False,
+                "error_code": str(capture_result.get("error_code") or "capture_failed"),
+                "reply": capture_result.get("reply") or "RTSP 视频采集失败。",
+                "data": {
+                    "source_id": source.source_id,
+                    "display_name": source.display_name,
+                    "line_id": source.line_id,
+                    "zone": selected_zone,
+                    "capture": capture_data,
+                    "workflow": ["capture-video-source"],
+                },
+            }
+
+        captured_path = Path(str(capture_data.get("video_path") or ""))
+        if not captured_path.is_absolute():
+            captured_path = PROJECT_ROOT / captured_path
+        detection_context = {
+            "video_path": str(captured_path),
+            "video_start_time": capture_data.get("started_at"),
+            "source_ended_at": capture_data.get("ended_at"),
+            "line_id": source.line_id,
+            "parameters": parameters,
+        }
+        try:
+            detection_result = self.detect_video(session_id, detection_context)
+        except Exception:
+            return {
+                "ok": False,
+                "error_code": "detection_failed",
+                "reply": f"{source.display_name}视频已采集，但异物检测执行失败。",
+                "data": {
+                    "source_id": source.source_id,
+                    "display_name": source.display_name,
+                    "line_id": source.line_id,
+                    "zone": selected_zone,
+                    "capture": capture_data,
+                    "workflow": ["capture-video-source", "detect-video"],
+                },
+            }
+
+        data = dict(detection_result.get("data") or {})
+        data.update(
+            {
+                "source_id": source.source_id,
+                "display_name": source.display_name,
+                "line_id": source.line_id,
+                "zone": selected_zone,
+                "capture": capture_data,
+                "workflow": [
+                    "capture-video-source",
+                    "detect-video",
+                    "assess-risk",
+                    "persist-history",
+                    "create-alarm",
+                ],
+            }
+        )
+        if not detection_result.get("ok"):
+            return {
+                "ok": False,
+                "error_code": str(
+                    detection_result.get("error_code") or "detection_failed"
+                ),
+                "reply": detection_result.get("reply") or "异物检测执行失败。",
+                "data": data,
+                "requires_attachment": bool(
+                    detection_result.get("requires_attachment")
+                ),
+            }
+        detection_reply = str(detection_result.get("reply") or "任务已完成。")
+        if detection_reply.startswith("视频检测完成："):
+            detection_reply = detection_reply.removeprefix("视频检测完成：")
+        return {
+            "ok": True,
+            "reply": f"{source.display_name}实时检测完成：{detection_reply}",
+            "data": data,
+        }
+
     @staticmethod
     def video_event_frames(detection: Dict[str, Any]) -> list[Dict[str, Any]]:
         frames: list[Dict[str, Any]] = []

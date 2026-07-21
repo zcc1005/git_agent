@@ -263,8 +263,8 @@ export function mountAgentChat(root) {
     const detectionRequested = Boolean(message) && (
       Boolean(media)
       || (
-        /(?:检测|识别|分析|检查|看看|看一下|跑一下)/.test(message)
-        && /(?:图片|图像|照片|视频|这张|这段|这个)/.test(message)
+        /(?:检测|识别|分析|检查|巡检|看看|看一下|跑一下)/.test(message)
+        && /(?:图片|图像|照片|视频|这张|这段|这个|监控|摄像头|视频流|实时流|RTSP|monitor)/i.test(message)
       )
     );
     const pendingText = detectionRequested
