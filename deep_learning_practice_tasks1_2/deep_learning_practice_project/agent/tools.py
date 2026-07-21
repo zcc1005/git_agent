@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional
 
+from agent.monitoring import ACTIVE_MONITORING_STATUSES, MonitoringTaskManager
 from agent.streaming import (
     RtspStreamCapture,
     RtspStreamProbe,
@@ -111,6 +113,7 @@ class AgentTools:
         stream_probe_runner: Optional[StreamProbeRunner] = None,
         stream_capture_runner: Optional[StreamCaptureRunner] = None,
         video_source_registry_loader: Optional[VideoSourceRegistryLoader] = None,
+        monitoring_manager: Optional[MonitoringTaskManager] = None,
         now: Optional[Callable[[], datetime]] = None,
     ) -> None:
         self.store = store
@@ -126,6 +129,14 @@ class AgentTools:
             video_source_registry_loader or load_video_source_registry
         )
         self._now = now or (lambda: datetime.now().astimezone())
+        # Flask 请求与后台监控线程共享模型实例时，串行化重型推理，
+        # 避免同一进程内同时占用 GPU/模型状态。
+        self._detection_lock = threading.RLock()
+        self._monitoring_manager = monitoring_manager or MonitoringTaskManager(
+            self.store,
+            self.detect_video_source,
+            now=self._now,
+        )
 
     def current_time(self) -> datetime:
         """Return the clock used by tools so planning and execution share one time source."""
@@ -479,6 +490,221 @@ class AgentTools:
             "data": data,
         }
 
+    def start_monitoring_task(
+        self,
+        session_id: str,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        source_id = str(context.get("source_id") or "").strip().lower()
+        try:
+            registry = self._video_source_registry_loader()
+            source = registry.get(source_id)
+        except FileNotFoundError:
+            return {
+                "ok": False,
+                "error_code": "configuration_error",
+                "reply": "视频源注册表尚未配置。",
+                "data": {},
+            }
+        except ValueError:
+            return {
+                "ok": False,
+                "error_code": "configuration_error",
+                "reply": "视频源注册表配置无效。",
+                "data": {},
+            }
+        except LookupError:
+            return {
+                "ok": False,
+                "error_code": "source_not_found",
+                "reply": f"未找到已注册的视频源：{source_id}",
+                "data": {},
+            }
+        if not source.is_rtsp or source.stream is None:
+            return {
+                "ok": False,
+                "error_code": "not_rtsp_source",
+                "reply": f"{source.display_name}不是 RTSP 视频源，无法启动监控任务。",
+                "data": {},
+            }
+
+        zone_id = str(context.get("zone_id") or "").strip().lower()
+        if zone_id and not any(zone.zone_id == zone_id for zone in source.zones):
+            return {
+                "ok": False,
+                "error_code": "zone_not_found",
+                "reply": f"视频源 {source.display_name} 未注册区域：{zone_id}",
+                "data": {
+                    "available_zones": [zone.zone_id for zone in source.zones]
+                },
+            }
+
+        current = self.current_time()
+        start_value = context.get("start_time")
+        start = (
+            datetime.fromisoformat(str(start_value).replace("Z", "+00:00"))
+            if start_value
+            else current
+        )
+        if start.tzinfo is None:
+            return {
+                "ok": False,
+                "error_code": "invalid_schedule",
+                "reply": "start_time 必须包含时区。",
+                "data": {},
+            }
+        end_value = context.get("end_time")
+        run_duration = context.get("run_duration_seconds")
+        if end_value:
+            end = datetime.fromisoformat(str(end_value).replace("Z", "+00:00"))
+        else:
+            end = start + timedelta(seconds=float(run_duration))
+        if end.tzinfo is None:
+            return {
+                "ok": False,
+                "error_code": "invalid_schedule",
+                "reply": "end_time 必须包含时区。",
+                "data": {},
+            }
+        config = {
+            "capture_duration_seconds": float(
+                context.get("capture_duration_seconds")
+                or source.stream.capture_window_seconds
+            ),
+            "interval_seconds": float(context.get("interval_seconds", 60.0)),
+            "max_consecutive_failures": int(
+                context.get("max_consecutive_failures", 3)
+            ),
+            "parameters": dict(context.get("parameters") or {}),
+        }
+        try:
+            task = self._monitoring_manager.start_task(
+                session_id,
+                source_id=source.source_id,
+                line_id=source.line_id,
+                zone_id=zone_id,
+                start_time=start,
+                end_time=end,
+                config=config,
+            )
+        except ValueError as exc:
+            return {
+                "ok": False,
+                "error_code": "invalid_schedule",
+                "reply": str(exc),
+                "data": {},
+            }
+        job = self.store.get_monitoring_job(task.id)
+        return {
+            "ok": True,
+            "reply": (
+                f"已创建{source.display_name}非全天候监控任务，"
+                f"计划从 {task.start_time} 运行到 {task.end_time}。"
+            ),
+            "data": {
+                **task.to_dict(),
+                "monitoring_job": job.to_dict() if job else {},
+            },
+        }
+
+    def control_monitoring_task(
+        self,
+        session_id: str,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        action = str(context.get("action") or "query").strip().lower()
+        task_id = str(context.get("task_id") or "").strip().lower()
+        source_id = str(context.get("source_id") or "").strip().lower()
+        limit = int(context.get("limit", 10))
+        if action == "query":
+            if task_id:
+                task = self.store.get_monitoring_task(task_id)
+                if task is None or task.session_id != session_id:
+                    return {
+                        "ok": False,
+                        "error_code": "task_not_found",
+                        "reply": f"找不到当前会话的监控任务：{task_id}",
+                        "data": {},
+                    }
+                runs = self.store.list_monitoring_runs(task.id, limit=limit)
+                job = self.store.get_monitoring_job(task.id)
+                segments = self.store.list_stream_segments(task.id, limit=limit)
+                return {
+                    "ok": True,
+                    "reply": (
+                        f"监控任务 {task.id} 当前状态为 "
+                        f"{job.status if job else task.status}，"
+                        f"已完成 {task.runs_completed} 轮检测。"
+                    ),
+                    "data": {
+                        "found": True,
+                        "task": task.to_dict(),
+                        "monitoring_job": job.to_dict() if job else {},
+                        "runs": [run.to_dict() for run in runs],
+                        "segments": [segment.to_dict() for segment in segments],
+                    },
+                }
+            tasks = self.store.list_monitoring_tasks(
+                session_id=session_id,
+                source_id=source_id,
+                limit=limit,
+            )
+            return {
+                "ok": True,
+                "reply": (
+                    f"当前会话共有 {len(tasks)} 条监控任务记录。"
+                    if tasks
+                    else "当前会话还没有监控任务。"
+                ),
+                "data": {
+                    "found": bool(tasks),
+                    "tasks": [task.to_dict() for task in tasks],
+                    "monitoring_jobs": [
+                        job.to_dict()
+                        for task in tasks
+                        for job in [self.store.get_monitoring_job(task.id)]
+                        if job is not None
+                    ],
+                },
+            }
+
+        if not task_id:
+            active = self.store.list_monitoring_tasks(
+                session_id=session_id,
+                source_id=source_id,
+                statuses=ACTIVE_MONITORING_STATUSES,
+                limit=1,
+            )
+            if not active:
+                return {
+                    "ok": False,
+                    "error_code": "task_not_found",
+                    "reply": "当前会话没有可停止的监控任务。",
+                    "data": {},
+                }
+            task_id = active[0].id
+        try:
+            task = self._monitoring_manager.stop_task(
+                task_id,
+                session_id=session_id,
+            )
+        except LookupError as exc:
+            return {
+                "ok": False,
+                "error_code": "task_not_found",
+                "reply": str(exc),
+                "data": {},
+            }
+        job = self.store.get_monitoring_job(task.id)
+        return {
+            "ok": True,
+            "reply": f"已请求停止监控任务 {task.id}；当前轮完成后不会启动下一轮。",
+            "data": {
+                **task.to_dict(),
+                "monitoring_job": job.to_dict() if job else {},
+            },
+        }
+
     @staticmethod
     def video_event_frames(detection: Dict[str, Any]) -> list[Dict[str, Any]]:
         frames: list[Dict[str, Any]] = []
@@ -528,7 +754,8 @@ class AgentTools:
             }
 
         parameters = dict(context.get("parameters") or {})
-        outcome = self._image_detection_runner(image_path, parameters)
+        with self._detection_lock:
+            outcome = self._image_detection_runner(image_path, parameters)
         detection_record, alarm_record = self.store.record_detection(
             session_id,
             source_type="image",
@@ -618,7 +845,8 @@ class AgentTools:
             video_start = video_start + timedelta(seconds=start_offset)
 
         parameters = dict(context.get("parameters") or {})
-        outcome = self._detection_runner(detection_video_path, video_start, parameters)
+        with self._detection_lock:
+            outcome = self._detection_runner(detection_video_path, video_start, parameters)
         source_started_at = _normalize_datetime_text(
             outcome.detection.get("video_start_time") or video_start
         )

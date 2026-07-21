@@ -295,6 +295,34 @@ class OpenAICompatiblePlannerTests(unittest.TestCase):
         self.assertEqual(arguments["start_time"], temporal["start_time"])
         self.assertEqual(arguments["end_time"], temporal["end_time"])
 
+    def test_monitoring_window_replaces_model_schedule_before_validation(self) -> None:
+        payload = {
+            "steps": [
+                {
+                    "skill_name": "start-monitoring-task",
+                    "arguments": {
+                        "source_id": "main-monitor",
+                        "run_duration_seconds": 999,
+                    },
+                }
+            ]
+        }
+        temporal = {
+            "kind": "absolute",
+            "start_time": "2026-07-21T08:00:00+08:00",
+            "end_time": "2026-07-21T09:00:00+08:00",
+        }
+
+        normalized = OpenAICompatibleSkillPlanner._apply_temporal_resolution_to_payload(
+            payload,
+            temporal,
+        )
+        arguments = normalized["steps"][0]["arguments"]
+
+        self.assertNotIn("run_duration_seconds", arguments)
+        self.assertEqual(arguments["start_time"], temporal["start_time"])
+        self.assertEqual(arguments["end_time"], temporal["end_time"])
+
     def test_env_factory_links_model_planner_to_agent_service(self) -> None:
         def transport(url, body, headers, timeout):
             del url, body, headers, timeout
@@ -508,6 +536,42 @@ class AgentSkillOrchestrationTests(unittest.TestCase):
         self.assertIn("明确动作指令", result["reply"])
         alarm = self.store.get_alarm(detected["data"]["alarm_id"])
         self.assertEqual(alarm.status, "pending")
+
+    def test_model_cannot_start_monitoring_from_a_status_question(self) -> None:
+        planner = StaticSkillPlanner(
+            SkillPlan(
+                steps=(
+                    SkillPlanStep(
+                        "start-monitoring-task",
+                        {"source_id": "main-monitor", "run_duration_seconds": 60},
+                    ),
+                )
+            )
+        )
+        service = AgentService(self.store, tools=self.tools, skill_planner=planner)
+
+        result = service.chat("看看监控现在是什么情况")
+
+        self.assertFalse(result["ok"])
+        self.assertIn("明确的开始或安排监控指令", result["reply"])
+
+    def test_model_cannot_stop_monitoring_from_an_ambiguous_request(self) -> None:
+        planner = StaticSkillPlanner(
+            SkillPlan(
+                steps=(
+                    SkillPlanStep(
+                        "control-monitoring-task",
+                        {"action": "stop"},
+                    ),
+                )
+            )
+        )
+        service = AgentService(self.store, tools=self.tools, skill_planner=planner)
+
+        result = service.chat("处理一下监控任务")
+
+        self.assertFalse(result["ok"])
+        self.assertIn("明确的停止指令", result["reply"])
 
 
 if __name__ == "__main__":

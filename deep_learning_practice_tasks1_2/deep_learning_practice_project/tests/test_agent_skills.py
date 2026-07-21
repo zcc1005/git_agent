@@ -193,6 +193,8 @@ class AgentSkillTests(unittest.TestCase):
                 "probe-video-source",
                 "capture-video-source",
                 "detect-video-source",
+                "start-monitoring-task",
+                "control-monitoring-task",
             },
         )
         alarm_spec = next(item for item in catalog if item["name"] == "control-alarm")
@@ -200,6 +202,13 @@ class AgentSkillTests(unittest.TestCase):
         self.assertEqual(action_schema["enum"], ["query", "confirm", "cancel"])
         self.assertEqual(action_schema["default"], "query")
         self.assertEqual(action_schema["aliases"]["view"], "query")
+        monitoring_spec = next(
+            item for item in catalog if item["name"] == "control-monitoring-task"
+        )
+        monitoring_action = monitoring_spec["input_schema"]["properties"]["action"]
+        self.assertEqual(monitoring_action["enum"], ["query", "stop"])
+        self.assertEqual(monitoring_action["aliases"]["view"], "query")
+        self.assertEqual(monitoring_action["aliases"]["cancel"], "stop")
         for item in catalog:
             self.assertIn("input_schema", item)
             self.assertFalse(item["input_schema"]["additionalProperties"])
@@ -327,6 +336,125 @@ class AgentSkillTests(unittest.TestCase):
         self.assertEqual(unknown_zone["data"]["available_zones"], ["belt-zone-a"])
         self.assertFalse(conflicting_roi["ok"])
         self.assertEqual(conflicting_roi["error_code"], "invalid_arguments")
+
+    def test_monitoring_skill_protocol_requires_one_bounded_end_condition(self) -> None:
+        invalid_arguments = (
+            {"source_id": "main-monitor"},
+            {
+                "source_id": "main-monitor",
+                "end_time": "2026-07-16T11:00:00+00:00",
+                "run_duration_seconds": 60,
+            },
+            {"source_id": "main-monitor", "run_duration_seconds": 86401},
+            {"source_id": "main-monitor", "run_duration_seconds": 60, "interval_seconds": 0},
+            {"source_id": "main-monitor", "run_duration_seconds": 60, "max_consecutive_failures": 11},
+        )
+
+        for arguments in invalid_arguments:
+            with self.subTest(arguments=arguments):
+                result = self.service.run_skill(
+                    "start-monitoring-task",
+                    session_id="operator",
+                    arguments=arguments,
+                )
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["error_code"], "invalid_arguments")
+
+    def test_monitoring_control_aliases_are_normalized(self) -> None:
+        queried = self.service.run_skill(
+            "control-monitoring-task",
+            session_id="operator",
+            arguments={"action": "view"},
+        )
+        stopped = self.service.run_skill(
+            "control-monitoring-task",
+            session_id="operator",
+            arguments={"action": "cancel"},
+        )
+
+        self.assertTrue(queried["ok"])
+        self.assertFalse(queried["data"]["found"])
+        self.assertFalse(stopped["ok"])
+        self.assertEqual(stopped["error_code"], "task_not_found")
+
+    def test_monitoring_skills_create_query_and_stop_a_session_scoped_task(self) -> None:
+        store = self.store
+
+        class RecordingManager:
+            def __init__(self):
+                self.start_calls = []
+
+            def start_task(self, session_id, **values):
+                self.start_calls.append((session_id, values))
+                return store.create_monitoring_task(
+                    session_id,
+                    source_id=values["source_id"],
+                    line_id=values["line_id"],
+                    zone_id=values["zone_id"],
+                    start_time=values["start_time"].isoformat(timespec="seconds"),
+                    end_time=values["end_time"].isoformat(timespec="seconds"),
+                    config=values["config"],
+                )
+
+            def stop_task(self, task_id, *, session_id):
+                task = store.get_monitoring_task(task_id)
+                if task is None or task.session_id != session_id:
+                    raise LookupError("找不到当前会话的监控任务")
+                return store.update_monitoring_task(task_id, status="stopped")
+
+        manager = RecordingManager()
+        self.service.tools._monitoring_manager = manager
+
+        started = self.service.run_skill(
+            "start-monitoring-task",
+            session_id="operator",
+            arguments={
+                "source_id": "main-monitor",
+                "run_duration_seconds": 120,
+                "capture_duration_seconds": 3,
+                "interval_seconds": 30,
+                "zone_id": "belt-zone-a",
+                "parameters": {"sample_fps": 2.0},
+            },
+        )
+        task_id = started["data"]["task_id"]
+        queried = self.service.run_skill(
+            "control-monitoring-task",
+            session_id="operator",
+            arguments={"action": "query", "task_id": task_id},
+        )
+        foreign_query = self.service.run_skill(
+            "control-monitoring-task",
+            session_id="other-operator",
+            arguments={"action": "query", "task_id": task_id},
+        )
+        stopped = self.service.run_skill(
+            "control-monitoring-task",
+            session_id="operator",
+            arguments={"action": "stop", "task_id": task_id},
+        )
+
+        self.assertTrue(started["ok"])
+        self.assertEqual(started["data"]["source_id"], "main-monitor")
+        self.assertEqual(started["data"]["line_id"], "main-line")
+        self.assertEqual(started["data"]["zone_id"], "belt-zone-a")
+        self.assertEqual(started["data"]["monitoring_job"]["status"], "pending")
+        self.assertEqual(manager.start_calls[0][1]["config"]["interval_seconds"], 30.0)
+        self.assertTrue(queried["ok"])
+        self.assertEqual(queried["data"]["task"]["task_id"], task_id)
+        self.assertEqual(
+            queried["data"]["monitoring_job"]["task_id"],
+            task_id,
+        )
+        self.assertEqual(queried["data"]["segments"], [])
+        self.assertFalse(foreign_query["ok"])
+        self.assertEqual(foreign_query["error_code"], "task_not_found")
+        self.assertTrue(stopped["ok"])
+        self.assertEqual(stopped["data"]["status"], "stopped")
+        self.assertEqual(
+            stopped["data"]["monitoring_job"]["status"],
+            "cancelled",
+        )
 
     def test_alarm_view_alias_is_a_safe_read_only_fallback(self) -> None:
         result = self.service.run_skill(

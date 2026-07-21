@@ -13,7 +13,9 @@ class FakeAgentService:
         self.chat_calls = []
         self.attachment_calls = []
         self.history_calls = []
+        self.skill_calls = []
         self.history_messages = [{"role": "assistant", "content": "历史消息"}]
+        self.monitoring_task_id = "monitor-abcdef123456"
 
     def chat(self, message, *, session_id="default", context=None):
         self.chat_calls.append(
@@ -61,6 +63,114 @@ class FakeAgentService:
         self.history_calls.append({"session_id": session_id, "limit": limit})
         return self.history_messages
 
+    def run_skill(self, skill_name, *, session_id="default", arguments=None):
+        arguments = dict(arguments or {})
+        self.skill_calls.append(
+            {
+                "skill_name": skill_name,
+                "session_id": session_id,
+                "arguments": arguments,
+            }
+        )
+        if skill_name == "start-monitoring-task":
+            return {
+                "skill_name": skill_name,
+                "ok": True,
+                "reply": "监控任务已创建。",
+                "data": {
+                    "task_id": self.monitoring_task_id,
+                    "source_id": arguments.get("source_id", "main-monitor"),
+                    "status": "scheduled",
+                    "monitoring_job": {
+                        "task_id": self.monitoring_task_id,
+                        "status": "pending",
+                    },
+                },
+            }
+        if skill_name != "control-monitoring-task":
+            raise AssertionError(f"unexpected skill: {skill_name}")
+        if arguments.get("action") == "stop":
+            return {
+                "skill_name": skill_name,
+                "ok": True,
+                "reply": "已请求停止监控任务。",
+                "data": {
+                    "task_id": self.monitoring_task_id,
+                    "status": "stop_requested",
+                    "monitoring_job": {
+                        "task_id": self.monitoring_task_id,
+                        "status": "stopping",
+                    },
+                },
+            }
+        if not arguments.get("task_id"):
+            return {
+                "skill_name": skill_name,
+                "ok": True,
+                "reply": "找到监控任务。",
+                "data": {
+                    "found": True,
+                    "tasks": [{"task_id": self.monitoring_task_id}],
+                },
+            }
+        return {
+            "skill_name": skill_name,
+            "ok": True,
+            "reply": "监控任务运行中。",
+            "data": {
+                "found": True,
+                "task": {
+                    "task_id": self.monitoring_task_id,
+                    "source_id": "main-monitor",
+                    "status": "running",
+                    "start_time": "2026-07-21T08:00:00+08:00",
+                    "end_time": "2026-07-21T09:00:00+08:00",
+                    "runs_completed": 1,
+                    "runs_succeeded": 1,
+                    "runs_failed": 0,
+                    "last_alarm_id": "",
+                    "last_detection_id": "det-web-monitor",
+                    "last_risk_level": "high",
+                    "last_error_message": "",
+                },
+                "monitoring_job": {
+                    "task_id": self.monitoring_task_id,
+                    "source_id": "main-monitor",
+                    "status": "connecting",
+                    "started_at": "2026-07-21T08:00:00+08:00",
+                    "ends_at": "2026-07-21T09:00:00+08:00",
+                    "last_processed_at": "2026-07-21T08:01:00+08:00",
+                    "last_error": "",
+                    "updated_at": "2026-07-21T08:01:01+08:00",
+                },
+                "segments": [
+                    {
+                        "segment_id": "segment-new",
+                        "task_id": self.monitoring_task_id,
+                        "source_id": "main-monitor",
+                        "video_path": "outputs/rtsp/new.mp4",
+                        "started_at": "2026-07-21T00:01:00+00:00",
+                        "ended_at": "2026-07-21T00:02:00+00:00",
+                        "status": "processing",
+                        "detection_id": "",
+                        "retry_count": 0,
+                    },
+                    {
+                        "segment_id": "segment-old",
+                        "task_id": self.monitoring_task_id,
+                        "source_id": "main-monitor",
+                        "video_path": "outputs/rtsp/old.mp4",
+                        "started_at": "2026-07-21T00:00:00+00:00",
+                        "ended_at": "2026-07-21T00:01:00+00:00",
+                        "status": "completed",
+                        "detection_id": "det-web-monitor",
+                        "retry_count": 0,
+                    },
+                ],
+                "runs": [{"run_index": 1, "status": "succeeded"}],
+            },
+        }
+
 
 class AgentWebIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -81,6 +191,8 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertIn('data-agent-chat', html)
         self.assertIn('agent_chat/agent_chat.js', html)
         self.assertIn('name="media"', html)
+        self.assertIn('data-agent-monitoring', html)
+        self.assertIn('/api/agent/monitoring/events', html)
 
     def test_chat_endpoint_forwards_message_and_session(self) -> None:
         response = self.client.post(
@@ -217,6 +329,85 @@ class AgentWebIntegrationTests(unittest.TestCase):
 
         self.assertEqual(empty_chat.status_code, 400)
         self.assertEqual(invalid_limit.status_code, 400)
+
+    def test_monitoring_start_endpoint_returns_immediately_with_polling_urls(self) -> None:
+        response = self.client.post(
+            "/api/agent/monitoring/start",
+            json={
+                "session_id": "web-session",
+                "source_id": "main-monitor",
+                "run_duration_seconds": 600,
+                "capture_duration_seconds": 30,
+                "interval_seconds": 60,
+            },
+        )
+
+        payload = response.get_json()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"]["task_id"], self.service.monitoring_task_id)
+        self.assertEqual(payload["polling"]["recommended_interval_ms"], 2000)
+        call = self.service.skill_calls[0]
+        self.assertEqual(call["skill_name"], "start-monitoring-task")
+        self.assertEqual(call["session_id"], "web-session")
+        self.assertNotIn("session_id", call["arguments"])
+
+    def test_monitoring_stop_endpoint_uses_control_skill(self) -> None:
+        response = self.client.post(
+            "/api/agent/monitoring/stop",
+            json={
+                "session_id": "web-session",
+                "task_id": self.service.monitoring_task_id,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        call = self.service.skill_calls[0]
+        self.assertEqual(call["skill_name"], "control-monitoring-task")
+        self.assertEqual(call["arguments"]["action"], "stop")
+        self.assertEqual(call["arguments"]["task_id"], self.service.monitoring_task_id)
+
+    def test_monitoring_status_returns_connection_segment_and_progress(self) -> None:
+        response = self.client.get(
+            "/api/agent/monitoring/status"
+            f"?session_id=web-session&task_id={self.service.monitoring_task_id}"
+        )
+
+        payload = response.get_json()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["found"])
+        self.assertEqual(payload["status"], "connecting")
+        self.assertEqual(payload["connection"]["label"], "正在连接/采集")
+        self.assertEqual(payload["current_segment"]["segment_id"], "segment-new")
+        self.assertEqual(payload["progress"]["estimated_percent"], 50)
+        self.assertEqual(payload["progress"]["runs_completed"], 1)
+
+    def test_monitoring_events_support_incremental_segment_cursor(self) -> None:
+        response = self.client.get(
+            "/api/agent/monitoring/events"
+            f"?session_id=web-session&task_id={self.service.monitoring_task_id}"
+            "&after_segment_id=segment-old"
+        )
+
+        payload = response.get_json()
+        segment_events = [
+            item for item in payload["events"] if item["event_type"] == "stream_segment"
+        ]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(segment_events), 1)
+        self.assertEqual(segment_events[0]["segment_id"], "segment-new")
+        self.assertEqual(payload["next_cursor"], "segment-new")
+        self.assertEqual(payload["current_segment"]["status"], "processing")
+
+    def test_monitoring_endpoint_rejects_unknown_fields_and_invalid_limit(self) -> None:
+        invalid_start = self.client.post(
+            "/api/agent/monitoring/start",
+            json={"source_id": "main-monitor", "rtsp_url": "rtsp://secret/live"},
+        )
+        invalid_events = self.client.get("/api/agent/monitoring/events?limit=0")
+
+        self.assertEqual(invalid_start.status_code, 400)
+        self.assertEqual(invalid_events.status_code, 400)
 
 
 if __name__ == "__main__":

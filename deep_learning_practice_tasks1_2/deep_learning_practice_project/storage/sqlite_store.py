@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
@@ -14,6 +15,34 @@ VALID_ALARM_STATUSES = {"inactive", "pending", "confirmed", "cancelled"}
 VALID_ALARM_ACTIONS = {"confirm", "cancel"}
 VALID_REVIEW_STATUSES = {"unreviewed", "confirmed", "rejected", "closed"}
 VALID_REVIEW_ACTIONS = {"confirm", "reject", "close", "reopen"}
+VALID_MONITORING_STATUSES = {
+    "scheduled",
+    "running",
+    "stop_requested",
+    "completed",
+    "stopped",
+    "failed",
+    "interrupted",
+}
+VALID_MONITORING_JOB_STATUSES = {
+    "pending",
+    "connecting",
+    "running",
+    "stopping",
+    "completed",
+    "failed",
+    "cancelled",
+}
+VALID_STREAM_SEGMENT_STATUSES = {"pending", "processing", "completed", "failed"}
+MONITORING_TASK_TO_JOB_STATUS = {
+    "scheduled": "pending",
+    "running": "running",
+    "stop_requested": "stopping",
+    "completed": "completed",
+    "stopped": "cancelled",
+    "failed": "failed",
+    "interrupted": "failed",
+}
 
 
 def _json_dump(value: Any) -> str:
@@ -22,6 +51,18 @@ def _json_dump(value: Any) -> str:
 
 def _json_load(value: str) -> Any:
     return json.loads(value) if value else {}
+
+
+def _normalized_utc_time(value: str | datetime, label: str) -> str:
+    try:
+        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(
+            str(value).replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise ValueError(f"{label} 必须是 ISO 8601 时间") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{label} 必须包含时区")
+    return parsed.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 @dataclass(frozen=True)
@@ -56,6 +97,146 @@ class AlarmRecord:
     report_text: str
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class MonitoringTaskRecord:
+    id: str
+    session_id: str
+    source_id: str
+    line_id: str
+    zone_id: str
+    status: str
+    start_time: str
+    end_time: str
+    config: Dict[str, Any]
+    runs_completed: int
+    runs_succeeded: int
+    runs_failed: int
+    consecutive_failures: int
+    last_run_started_at: str
+    last_run_ended_at: str
+    last_detection_id: str
+    last_alarm_id: str
+    last_risk_level: str
+    last_error_code: str
+    last_error_message: str
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.id,
+            "session_id": self.session_id,
+            "source_id": self.source_id,
+            "line_id": self.line_id,
+            "zone_id": self.zone_id,
+            "status": self.status,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "config": self.config,
+            "runs_completed": self.runs_completed,
+            "runs_succeeded": self.runs_succeeded,
+            "runs_failed": self.runs_failed,
+            "consecutive_failures": self.consecutive_failures,
+            "last_run_started_at": self.last_run_started_at,
+            "last_run_ended_at": self.last_run_ended_at,
+            "last_detection_id": self.last_detection_id,
+            "last_alarm_id": self.last_alarm_id,
+            "last_risk_level": self.last_risk_level,
+            "last_error_code": self.last_error_code,
+            "last_error_message": self.last_error_message,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass(frozen=True)
+class MonitoringRunRecord:
+    id: int
+    task_id: str
+    run_index: int
+    status: str
+    started_at: str
+    ended_at: str
+    detection_id: str
+    alarm_id: str
+    risk_level: str
+    error_code: str
+    error_message: str
+    result: Dict[str, Any]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "run_id": self.id,
+            "task_id": self.task_id,
+            "run_index": self.run_index,
+            "status": self.status,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "detection_id": self.detection_id,
+            "alarm_id": self.alarm_id,
+            "risk_level": self.risk_level,
+            "error_code": self.error_code,
+            "error_message": self.error_message,
+            "result": self.result,
+        }
+
+
+@dataclass(frozen=True)
+class MonitoringJobRecord:
+    task_id: str
+    source_id: str
+    status: str
+    started_at: str
+    ends_at: str
+    segment_seconds: float
+    last_processed_at: str
+    last_error: str
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "source_id": self.source_id,
+            "status": self.status,
+            "started_at": self.started_at,
+            "ends_at": self.ends_at,
+            "segment_seconds": self.segment_seconds,
+            "last_processed_at": self.last_processed_at,
+            "last_error": self.last_error,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass(frozen=True)
+class StreamSegmentRecord:
+    segment_id: str
+    task_id: str
+    source_id: str
+    video_path: str
+    started_at: str
+    ended_at: str
+    status: str
+    detection_id: str
+    retry_count: int
+    created_at: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "segment_id": self.segment_id,
+            "task_id": self.task_id,
+            "source_id": self.source_id,
+            "video_path": self.video_path,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "status": self.status,
+            "detection_id": self.detection_id,
+            "retry_count": self.retry_count,
+            "created_at": self.created_at,
+        }
 
 
 class SQLiteHistoryStore:
@@ -166,6 +347,88 @@ class SQLiteHistoryStore:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS monitoring_tasks (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL,
+                    line_id TEXT NOT NULL DEFAULT '',
+                    zone_id TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL CHECK (
+                        status IN (
+                            'scheduled', 'running', 'stop_requested', 'completed',
+                            'stopped', 'failed', 'interrupted'
+                        )
+                    ),
+                    start_time TEXT NOT NULL,
+                    end_time TEXT NOT NULL,
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    runs_completed INTEGER NOT NULL DEFAULT 0,
+                    runs_succeeded INTEGER NOT NULL DEFAULT 0,
+                    runs_failed INTEGER NOT NULL DEFAULT 0,
+                    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                    last_run_started_at TEXT NOT NULL DEFAULT '',
+                    last_run_ended_at TEXT NOT NULL DEFAULT '',
+                    last_detection_id TEXT NOT NULL DEFAULT '',
+                    last_alarm_id TEXT NOT NULL DEFAULT '',
+                    last_risk_level TEXT NOT NULL DEFAULT '',
+                    last_error_code TEXT NOT NULL DEFAULT '',
+                    last_error_message TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS monitoring_task_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL REFERENCES monitoring_tasks(id) ON DELETE CASCADE,
+                    run_index INTEGER NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT NOT NULL,
+                    detection_id TEXT NOT NULL DEFAULT '',
+                    alarm_id TEXT NOT NULL DEFAULT '',
+                    risk_level TEXT NOT NULL DEFAULT '',
+                    error_code TEXT NOT NULL DEFAULT '',
+                    error_message TEXT NOT NULL DEFAULT '',
+                    result_json TEXT NOT NULL DEFAULT '{}',
+                    UNIQUE(task_id, run_index)
+                );
+
+                CREATE TABLE IF NOT EXISTS monitoring_jobs (
+                    task_id TEXT PRIMARY KEY
+                        REFERENCES monitoring_tasks(id) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (
+                        status IN (
+                            'pending', 'connecting', 'running', 'stopping',
+                            'completed', 'failed', 'cancelled'
+                        )
+                    ),
+                    started_at TEXT NOT NULL,
+                    ends_at TEXT NOT NULL,
+                    segment_seconds REAL NOT NULL CHECK (segment_seconds > 0),
+                    last_processed_at TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS stream_segments (
+                    segment_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL
+                        REFERENCES monitoring_jobs(task_id) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL,
+                    video_path TEXT NOT NULL DEFAULT '',
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (
+                        status IN ('pending', 'processing', 'completed', 'failed')
+                    ),
+                    detection_id TEXT NOT NULL DEFAULT '',
+                    retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+                    created_at TEXT NOT NULL,
+                    UNIQUE(task_id, source_id, started_at, ended_at)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_messages_session_created
                     ON messages(session_id, created_at, id);
                 CREATE INDEX IF NOT EXISTS idx_detection_session_created
@@ -174,8 +437,53 @@ class SQLiteHistoryStore:
                     ON alarms(session_id, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_alarm_level_created
                     ON alarms(risk_level, created_at);
+                CREATE INDEX IF NOT EXISTS idx_monitoring_session_created
+                    ON monitoring_tasks(session_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_monitoring_source_status
+                    ON monitoring_tasks(source_id, status, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_monitoring_runs_task
+                    ON monitoring_task_runs(task_id, run_index DESC);
+                CREATE INDEX IF NOT EXISTS idx_monitoring_jobs_source_status
+                    ON monitoring_jobs(source_id, status, updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_stream_segments_task_started
+                    ON stream_segments(task_id, started_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_stream_segments_detection
+                    ON stream_segments(detection_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_stream_segments_video_path
+                    ON stream_segments(video_path)
+                    WHERE video_path <> '';
                 """
             )
+            missing_jobs = connection.execute(
+                """
+                SELECT task.* FROM monitoring_tasks AS task
+                LEFT JOIN monitoring_jobs AS job ON job.task_id = task.id
+                WHERE job.task_id IS NULL
+                """
+            ).fetchall()
+            for task in missing_jobs:
+                config = _json_load(task["config_json"])
+                connection.execute(
+                    """
+                    INSERT INTO monitoring_jobs(
+                        task_id, source_id, status, started_at, ends_at,
+                        segment_seconds, last_processed_at, last_error,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        task["id"],
+                        task["source_id"],
+                        MONITORING_TASK_TO_JOB_STATUS[task["status"]],
+                        task["start_time"],
+                        task["end_time"],
+                        float(config.get("capture_duration_seconds") or 60.0),
+                        task["last_run_ended_at"],
+                        task["last_error_message"],
+                        task["created_at"],
+                        task["updated_at"],
+                    ),
+                )
             self._ensure_column(connection, "detection_runs", "line_id", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(
                 connection, "detection_runs", "source_started_at", "TEXT NOT NULL DEFAULT ''"
@@ -210,6 +518,80 @@ class SQLiteHistoryStore:
                 "CREATE INDEX IF NOT EXISTS idx_detection_review_status "
                 "ON detection_runs(review_status, created_at DESC)"
             )
+
+    @staticmethod
+    def _monitoring_task_from_row(row: sqlite3.Row) -> MonitoringTaskRecord:
+        return MonitoringTaskRecord(
+            id=row["id"],
+            session_id=row["session_id"],
+            source_id=row["source_id"],
+            line_id=row["line_id"],
+            zone_id=row["zone_id"],
+            status=row["status"],
+            start_time=row["start_time"],
+            end_time=row["end_time"],
+            config=_json_load(row["config_json"]),
+            runs_completed=int(row["runs_completed"]),
+            runs_succeeded=int(row["runs_succeeded"]),
+            runs_failed=int(row["runs_failed"]),
+            consecutive_failures=int(row["consecutive_failures"]),
+            last_run_started_at=row["last_run_started_at"],
+            last_run_ended_at=row["last_run_ended_at"],
+            last_detection_id=row["last_detection_id"],
+            last_alarm_id=row["last_alarm_id"],
+            last_risk_level=row["last_risk_level"],
+            last_error_code=row["last_error_code"],
+            last_error_message=row["last_error_message"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _monitoring_run_from_row(row: sqlite3.Row) -> MonitoringRunRecord:
+        return MonitoringRunRecord(
+            id=int(row["id"]),
+            task_id=row["task_id"],
+            run_index=int(row["run_index"]),
+            status=row["status"],
+            started_at=row["started_at"],
+            ended_at=row["ended_at"],
+            detection_id=row["detection_id"],
+            alarm_id=row["alarm_id"],
+            risk_level=row["risk_level"],
+            error_code=row["error_code"],
+            error_message=row["error_message"],
+            result=_json_load(row["result_json"]),
+        )
+
+    @staticmethod
+    def _monitoring_job_from_row(row: sqlite3.Row) -> MonitoringJobRecord:
+        return MonitoringJobRecord(
+            task_id=row["task_id"],
+            source_id=row["source_id"],
+            status=row["status"],
+            started_at=row["started_at"],
+            ends_at=row["ends_at"],
+            segment_seconds=float(row["segment_seconds"]),
+            last_processed_at=row["last_processed_at"],
+            last_error=row["last_error"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _stream_segment_from_row(row: sqlite3.Row) -> StreamSegmentRecord:
+        return StreamSegmentRecord(
+            segment_id=row["segment_id"],
+            task_id=row["task_id"],
+            source_id=row["source_id"],
+            video_path=row["video_path"],
+            started_at=row["started_at"],
+            ended_at=row["ended_at"],
+            status=row["status"],
+            detection_id=row["detection_id"],
+            retry_count=int(row["retry_count"]),
+            created_at=row["created_at"],
+        )
 
     @staticmethod
     def _ensure_column(
@@ -769,3 +1151,559 @@ class SQLiteHistoryStore:
             "alarm_status_counts": alarm_status_counts,
             "class_counts": class_counts,
         }
+
+    def create_monitoring_task(
+        self,
+        session_id: str,
+        *,
+        source_id: str,
+        line_id: str,
+        zone_id: str,
+        start_time: str,
+        end_time: str,
+        config: Dict[str, Any],
+    ) -> MonitoringTaskRecord:
+        self.ensure_session(session_id)
+        timestamp = self._timestamp()
+        task_id = f"monitor-{uuid.uuid4().hex[:12]}"
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO monitoring_tasks(
+                    id, session_id, source_id, line_id, zone_id, status,
+                    start_time, end_time, config_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?)
+                """,
+                (
+                    task_id,
+                    session_id,
+                    source_id,
+                    line_id,
+                    zone_id,
+                    start_time,
+                    end_time,
+                    _json_dump(config),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO monitoring_jobs(
+                    task_id, source_id, status, started_at, ends_at,
+                    segment_seconds, created_at, updated_at
+                ) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)
+                """,
+                (
+                    task_id,
+                    source_id,
+                    start_time,
+                    end_time,
+                    float(config.get("capture_duration_seconds") or 60.0),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM monitoring_tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+        return self._monitoring_task_from_row(row)
+
+    def get_monitoring_task(self, task_id: str) -> Optional[MonitoringTaskRecord]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM monitoring_tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+        return self._monitoring_task_from_row(row) if row else None
+
+    def list_monitoring_tasks(
+        self,
+        *,
+        session_id: str = "",
+        source_id: str = "",
+        statuses: tuple[str, ...] = (),
+        limit: int = 20,
+    ) -> List[MonitoringTaskRecord]:
+        if limit < 1:
+            return []
+        query = "SELECT * FROM monitoring_tasks WHERE 1 = 1"
+        parameters: List[Any] = []
+        if session_id:
+            query += " AND session_id = ?"
+            parameters.append(session_id)
+        if source_id:
+            query += " AND source_id = ?"
+            parameters.append(source_id)
+        if statuses:
+            unknown = set(statuses) - VALID_MONITORING_STATUSES
+            if unknown:
+                raise ValueError(f"无效监控任务状态：{', '.join(sorted(unknown))}")
+            placeholders = ",".join("?" for _ in statuses)
+            query += f" AND status IN ({placeholders})"
+            parameters.extend(statuses)
+        query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+        parameters.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(parameters)).fetchall()
+        return [self._monitoring_task_from_row(row) for row in rows]
+
+    def update_monitoring_task(
+        self,
+        task_id: str,
+        **changes: Any,
+    ) -> MonitoringTaskRecord:
+        allowed = {
+            "status",
+            "last_run_started_at",
+            "last_run_ended_at",
+            "last_detection_id",
+            "last_alarm_id",
+            "last_risk_level",
+            "last_error_code",
+            "last_error_message",
+        }
+        unknown = sorted(set(changes) - allowed)
+        if unknown:
+            raise ValueError(f"不支持的监控任务更新字段：{', '.join(unknown)}")
+        if changes.get("status") and changes["status"] not in VALID_MONITORING_STATUSES:
+            raise ValueError(f"无效监控任务状态：{changes['status']}")
+        if not changes:
+            task = self.get_monitoring_task(task_id)
+            if task is None:
+                raise LookupError(f"找不到监控任务：{task_id}")
+            return task
+        changes["updated_at"] = self._timestamp()
+        assignments = ", ".join(f"{name} = ?" for name in changes)
+        parameters = [changes[name] for name in changes]
+        parameters.append(task_id)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"UPDATE monitoring_tasks SET {assignments} WHERE id = ?",
+                tuple(parameters),
+            )
+            if cursor.rowcount == 0:
+                raise LookupError(f"找不到监控任务：{task_id}")
+            row = connection.execute(
+                "SELECT * FROM monitoring_tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            if "status" in changes:
+                job_status = MONITORING_TASK_TO_JOB_STATUS[str(row["status"])]
+                job_error = (
+                    str(changes.get("last_error_message") or "")
+                    if job_status == "failed"
+                    else None
+                )
+                if job_error is None:
+                    connection.execute(
+                        "UPDATE monitoring_jobs SET status = ?, updated_at = ? "
+                        "WHERE task_id = ?",
+                        (job_status, changes["updated_at"], task_id),
+                    )
+                else:
+                    connection.execute(
+                        "UPDATE monitoring_jobs SET status = ?, last_error = ?, "
+                        "updated_at = ? WHERE task_id = ?",
+                        (job_status, job_error, changes["updated_at"], task_id),
+                    )
+        return self._monitoring_task_from_row(row)
+
+    def request_monitoring_task_stop(self, task_id: str) -> MonitoringTaskRecord:
+        """Atomically request stop without moving a terminal task backwards."""
+        timestamp = self._timestamp()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE monitoring_tasks
+                SET status = 'stop_requested', updated_at = ?
+                WHERE id = ? AND status IN ('scheduled', 'running')
+                """,
+                (timestamp, task_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM monitoring_tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            if row is not None:
+                connection.execute(
+                    "UPDATE monitoring_jobs SET status = ?, updated_at = ? "
+                    "WHERE task_id = ?",
+                    (
+                        MONITORING_TASK_TO_JOB_STATUS[str(row["status"])],
+                        timestamp,
+                        task_id,
+                    ),
+                )
+        if row is None:
+            raise LookupError(f"找不到监控任务：{task_id}")
+        return self._monitoring_task_from_row(row)
+
+    def interrupt_monitoring_task_if_active(
+        self,
+        task_id: str,
+        *,
+        error_code: str,
+        error_message: str,
+    ) -> MonitoringTaskRecord:
+        """Atomically interrupt only a task that has not already terminated."""
+        timestamp = self._timestamp()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE monitoring_tasks
+                SET status = 'interrupted', last_error_code = ?,
+                    last_error_message = ?, updated_at = ?
+                WHERE id = ? AND status IN ('scheduled', 'running', 'stop_requested')
+                """,
+                (error_code, error_message, timestamp, task_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM monitoring_tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            if row is not None and str(row["status"]) == "interrupted":
+                connection.execute(
+                    """
+                    UPDATE monitoring_jobs
+                    SET status = 'failed', last_error = ?, updated_at = ?
+                    WHERE task_id = ?
+                    """,
+                    (error_message, timestamp, task_id),
+                )
+        if row is None:
+            raise LookupError(f"找不到监控任务：{task_id}")
+        return self._monitoring_task_from_row(row)
+
+    def record_monitoring_run(
+        self,
+        task_id: str,
+        *,
+        succeeded: bool,
+        started_at: str,
+        ended_at: str,
+        detection_id: str = "",
+        alarm_id: str = "",
+        risk_level: str = "",
+        error_code: str = "",
+        error_message: str = "",
+        result: Optional[Dict[str, Any]] = None,
+    ) -> tuple[MonitoringTaskRecord, MonitoringRunRecord]:
+        timestamp = self._timestamp()
+        with self._connect() as connection:
+            task_row = connection.execute(
+                "SELECT * FROM monitoring_tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            if task_row is None:
+                raise LookupError(f"找不到监控任务：{task_id}")
+            run_index = int(task_row["runs_completed"]) + 1
+            runs_succeeded = int(task_row["runs_succeeded"]) + int(succeeded)
+            runs_failed = int(task_row["runs_failed"]) + int(not succeeded)
+            consecutive_failures = (
+                0 if succeeded else int(task_row["consecutive_failures"]) + 1
+            )
+            cursor = connection.execute(
+                """
+                INSERT INTO monitoring_task_runs(
+                    task_id, run_index, status, started_at, ended_at,
+                    detection_id, alarm_id, risk_level, error_code,
+                    error_message, result_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task_id,
+                    run_index,
+                    "succeeded" if succeeded else "failed",
+                    started_at,
+                    ended_at,
+                    detection_id,
+                    alarm_id,
+                    risk_level,
+                    error_code,
+                    error_message,
+                    _json_dump(result or {}),
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE monitoring_tasks SET
+                    runs_completed = ?, runs_succeeded = ?, runs_failed = ?,
+                    consecutive_failures = ?, last_run_started_at = ?,
+                    last_run_ended_at = ?, last_detection_id = ?,
+                    last_alarm_id = ?, last_risk_level = ?, last_error_code = ?,
+                    last_error_message = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    run_index,
+                    runs_succeeded,
+                    runs_failed,
+                    consecutive_failures,
+                    started_at,
+                    ended_at,
+                    detection_id,
+                    alarm_id,
+                    risk_level,
+                    error_code,
+                    error_message,
+                    timestamp,
+                    task_id,
+                ),
+            )
+            updated_task = connection.execute(
+                "SELECT * FROM monitoring_tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            run_row = connection.execute(
+                "SELECT * FROM monitoring_task_runs WHERE id = ?",
+                (cursor.lastrowid,),
+            ).fetchone()
+            connection.execute(
+                """
+                UPDATE monitoring_jobs
+                SET last_processed_at = ?, last_error = ?, updated_at = ?
+                WHERE task_id = ?
+                """,
+                (ended_at, error_message, timestamp, task_id),
+            )
+        return (
+            self._monitoring_task_from_row(updated_task),
+            self._monitoring_run_from_row(run_row),
+        )
+
+    def list_monitoring_runs(
+        self,
+        task_id: str,
+        *,
+        limit: int = 20,
+    ) -> List[MonitoringRunRecord]:
+        if limit < 1:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM monitoring_task_runs
+                WHERE task_id = ?
+                ORDER BY run_index DESC
+                LIMIT ?
+                """,
+                (task_id, limit),
+            ).fetchall()
+        return [self._monitoring_run_from_row(row) for row in rows]
+
+    def get_monitoring_job(self, task_id: str) -> Optional[MonitoringJobRecord]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM monitoring_jobs WHERE task_id = ?", (task_id,)
+            ).fetchone()
+        return self._monitoring_job_from_row(row) if row else None
+
+    def list_monitoring_jobs(
+        self,
+        *,
+        source_id: str = "",
+        statuses: tuple[str, ...] = (),
+        limit: int = 20,
+    ) -> List[MonitoringJobRecord]:
+        if limit < 1:
+            return []
+        unknown = set(statuses) - VALID_MONITORING_JOB_STATUSES
+        if unknown:
+            raise ValueError(f"无效监控运行状态：{', '.join(sorted(unknown))}")
+        query = "SELECT * FROM monitoring_jobs WHERE 1 = 1"
+        parameters: List[Any] = []
+        if source_id:
+            query += " AND source_id = ?"
+            parameters.append(source_id)
+        if statuses:
+            placeholders = ",".join("?" for _ in statuses)
+            query += f" AND status IN ({placeholders})"
+            parameters.extend(statuses)
+        query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+        parameters.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(parameters)).fetchall()
+        return [self._monitoring_job_from_row(row) for row in rows]
+
+    def update_monitoring_job(
+        self,
+        task_id: str,
+        **changes: Any,
+    ) -> MonitoringJobRecord:
+        allowed = {"status", "last_processed_at", "last_error"}
+        unknown = sorted(set(changes) - allowed)
+        if unknown:
+            raise ValueError(f"不支持的监控运行状态字段：{', '.join(unknown)}")
+        if changes.get("status") and changes["status"] not in VALID_MONITORING_JOB_STATUSES:
+            raise ValueError(f"无效监控运行状态：{changes['status']}")
+        if not changes:
+            job = self.get_monitoring_job(task_id)
+            if job is None:
+                raise LookupError(f"找不到监控运行状态：{task_id}")
+            return job
+        changes["updated_at"] = self._timestamp()
+        assignments = ", ".join(f"{name} = ?" for name in changes)
+        parameters = [changes[name] for name in changes]
+        parameters.append(task_id)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"UPDATE monitoring_jobs SET {assignments} WHERE task_id = ?",
+                tuple(parameters),
+            )
+            if cursor.rowcount == 0:
+                raise LookupError(f"找不到监控运行状态：{task_id}")
+            row = connection.execute(
+                "SELECT * FROM monitoring_jobs WHERE task_id = ?", (task_id,)
+            ).fetchone()
+        return self._monitoring_job_from_row(row)
+
+    def claim_stream_segment(
+        self,
+        task_id: str,
+        *,
+        source_id: str,
+        started_at: str | datetime,
+        ended_at: str | datetime,
+    ) -> tuple[StreamSegmentRecord, bool]:
+        """Create or atomically claim one logical stream window.
+
+        The unique logical window prevents two workers, retries, or restarts from
+        detecting the same segment concurrently or after it has completed.
+        """
+        normalized_start = _normalized_utc_time(started_at, "started_at")
+        normalized_end = _normalized_utc_time(ended_at, "ended_at")
+        if normalized_end <= normalized_start:
+            raise ValueError("ended_at 必须晚于 started_at")
+        identity = f"{task_id}|{source_id}|{normalized_start}|{normalized_end}"
+        segment_id = f"segment-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:16]}"
+        timestamp = self._timestamp()
+        with self._connect() as connection:
+            job = connection.execute(
+                "SELECT source_id FROM monitoring_jobs WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            if job is None:
+                raise LookupError(f"找不到监控运行状态：{task_id}")
+            if str(job["source_id"]) != source_id:
+                raise ValueError("stream segment 的 source_id 与监控任务不一致")
+            connection.execute(
+                """
+                INSERT INTO stream_segments(
+                    segment_id, task_id, source_id, started_at, ended_at,
+                    status, created_at
+                ) VALUES (?, ?, ?, ?, ?, 'pending', ?)
+                ON CONFLICT(task_id, source_id, started_at, ended_at) DO NOTHING
+                """,
+                (
+                    segment_id,
+                    task_id,
+                    source_id,
+                    normalized_start,
+                    normalized_end,
+                    timestamp,
+                ),
+            )
+            row = connection.execute(
+                """
+                SELECT * FROM stream_segments
+                WHERE task_id = ? AND source_id = ?
+                  AND started_at = ? AND ended_at = ?
+                """,
+                (task_id, source_id, normalized_start, normalized_end),
+            ).fetchone()
+            should_process = str(row["status"]) in {"pending", "failed"}
+            if should_process:
+                retry_count = int(row["retry_count"]) + int(row["status"] == "failed")
+                connection.execute(
+                    """
+                    UPDATE stream_segments
+                    SET status = 'processing', retry_count = ?
+                    WHERE segment_id = ? AND status IN ('pending', 'failed')
+                    """,
+                    (retry_count, row["segment_id"]),
+                )
+                row = connection.execute(
+                    "SELECT * FROM stream_segments WHERE segment_id = ?",
+                    (row["segment_id"],),
+                ).fetchone()
+        return self._stream_segment_from_row(row), should_process
+
+    def finish_stream_segment(
+        self,
+        segment_id: str,
+        *,
+        succeeded: bool,
+        video_path: str = "",
+        detection_id: str = "",
+    ) -> StreamSegmentRecord:
+        with self._connect() as connection:
+            current = connection.execute(
+                "SELECT * FROM stream_segments WHERE segment_id = ?", (segment_id,)
+            ).fetchone()
+            if current is None:
+                raise LookupError(f"找不到视频片段：{segment_id}")
+            if str(current["status"]) != "completed":
+                connection.execute(
+                    """
+                    UPDATE stream_segments
+                    SET status = ?, video_path = ?, detection_id = ?
+                    WHERE segment_id = ?
+                    """,
+                    (
+                        "completed" if succeeded else "failed",
+                        str(video_path or current["video_path"]),
+                        str(detection_id or current["detection_id"]),
+                        segment_id,
+                    ),
+                )
+            row = connection.execute(
+                "SELECT * FROM stream_segments WHERE segment_id = ?", (segment_id,)
+            ).fetchone()
+        return self._stream_segment_from_row(row)
+
+    def list_stream_segments(
+        self,
+        task_id: str,
+        *,
+        limit: int = 100,
+    ) -> List[StreamSegmentRecord]:
+        if limit < 1:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM stream_segments
+                WHERE task_id = ?
+                ORDER BY started_at DESC, segment_id DESC
+                LIMIT ?
+                """,
+                (task_id, limit),
+            ).fetchall()
+        return [self._stream_segment_from_row(row) for row in rows]
+
+    def interrupt_active_monitoring_tasks(self) -> int:
+        timestamp = self._timestamp()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE monitoring_tasks
+                SET status = 'interrupted',
+                    last_error_code = 'process_restarted',
+                    last_error_message = '应用进程已重启，任务未自动恢复。',
+                    updated_at = ?
+                WHERE status IN ('scheduled', 'running', 'stop_requested')
+                """,
+                (timestamp,),
+            )
+            connection.execute(
+                """
+                UPDATE monitoring_jobs
+                SET status = 'failed',
+                    last_error = '应用进程已重启，任务未自动恢复。',
+                    updated_at = ?
+                WHERE status IN ('pending', 'connecting', 'running', 'stopping')
+                """,
+                (timestamp,),
+            )
+            connection.execute(
+                """
+                UPDATE stream_segments
+                SET status = 'failed'
+                WHERE status = 'processing'
+                """
+            )
+            return int(cursor.rowcount)

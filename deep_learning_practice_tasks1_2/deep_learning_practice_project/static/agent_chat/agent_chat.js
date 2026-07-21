@@ -153,6 +153,28 @@ function newSessionId() {
   return `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+const TERMINAL_MONITORING_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
+function findMonitoringTaskId(value) {
+  if (!value || typeof value !== "object") return "";
+  if (value.monitoring_job?.task_id) return String(value.monitoring_job.task_id);
+  if (Array.isArray(value.steps)) {
+    for (let index = value.steps.length - 1; index >= 0; index -= 1) {
+      const nested = findMonitoringTaskId(value.steps[index]?.data);
+      if (nested) return nested;
+    }
+  }
+  if (value.data && typeof value.data === "object") {
+    return findMonitoringTaskId(value.data);
+  }
+  return "";
+}
+
+function monitoringPathLabel(path) {
+  const normalized = String(path || "").replaceAll("\\", "/");
+  return normalized.split("/").pop() || "";
+}
+
 export function mountAgentChat(root) {
   const form = root.querySelector("[data-agent-form]");
   const textarea = form.querySelector("textarea[name='message']");
@@ -161,14 +183,32 @@ export function mountAgentChat(root) {
   const messages = root.querySelector("[data-agent-messages]");
   const status = root.querySelector("[data-agent-status]");
   const fileLabel = root.querySelector("[data-agent-file]");
+  const monitoringPanel = root.querySelector("[data-agent-monitoring]");
+  const monitoringConnection = root.querySelector("[data-agent-monitoring-connection]");
+  const monitoringSegment = root.querySelector("[data-agent-monitoring-segment]");
+  const monitoringProgress = root.querySelector("[data-agent-monitoring-progress]");
+  const monitoringAlarm = root.querySelector("[data-agent-monitoring-alarm]");
+  const monitoringReason = root.querySelector("[data-agent-monitoring-reason]");
+  const monitoringProgressBar = root.querySelector("[data-agent-monitoring-progress-bar]");
+  const monitoringStop = root.querySelector("[data-agent-monitoring-stop]");
   const endpoint = root.dataset.endpoint || "/api/agent/chat";
   const historyEndpoint = root.dataset.historyEndpoint || "/api/agent/history";
+  const monitoringStopEndpoint = root.dataset.monitoringStopEndpoint
+    || "/api/agent/monitoring/stop";
+  const monitoringEventsEndpoint = root.dataset.monitoringEventsEndpoint
+    || "/api/agent/monitoring/events";
   const storageKey = "foreign-object-agent-session";
   let sessionId = localStorage.getItem(storageKey);
   if (!sessionId) {
     sessionId = newSessionId();
     localStorage.setItem(storageKey, sessionId);
   }
+  const monitoringTaskStorageKey = `${storageKey}:monitoring-task:${sessionId}`;
+  let monitoringTaskId = localStorage.getItem(monitoringTaskStorageKey) || "";
+  let monitoringCursor = "";
+  let monitoringTimer = 0;
+  let monitoringPolling = false;
+  let lastMonitoringAlarmId = "";
 
   function append(role, text, isError = false, attachment = null) {
     const article = createMessage(role, text, isError, attachment);
@@ -206,6 +246,127 @@ export function mountAgentChat(root) {
     }
     article.append(reportBody);
     messages.scrollTop = messages.scrollHeight;
+  }
+
+  function renderMonitoring(snapshot, { announceAlarm = true } = {}) {
+    if (!snapshot?.found && !snapshot?.task_id) {
+      monitoringPanel.hidden = true;
+      return;
+    }
+    monitoringPanel.hidden = false;
+    const connection = snapshot.connection || {};
+    const segment = snapshot.current_segment || {};
+    const progress = snapshot.progress || {};
+    const alarm = snapshot.latest_alarm || {};
+    monitoringConnection.textContent = connection.label || snapshot.status || "未知";
+    monitoringSegment.textContent = segment.segment_id
+      ? `${monitoringPathLabel(segment.video_path) || segment.segment_id} · ${segment.status || ""}`
+      : "等待片段";
+    const percent = Math.max(0, Math.min(100, Number(progress.estimated_percent || 0)));
+    const phaseLabels = {
+      waiting: "等待开始",
+      capturing_or_detecting: "正在采集/检测",
+      waiting_next_segment: "等待下一轮",
+      stopping_after_current_segment: "当前轮结束后停止",
+      completed: "检测完成",
+      failed: "检测失败",
+      cancelled: "已取消",
+    };
+    monitoringProgress.textContent = `${phaseLabels[progress.phase] || progress.phase || "—"} · ${percent}%`;
+    monitoringProgressBar.style.width = `${percent}%`;
+    monitoringAlarm.textContent = alarm.alarm_id
+      ? `${alarm.risk_level || "未知风险"} · ${alarm.status || alarm.alarm_id}`
+      : "暂无报警";
+    monitoringReason.textContent = snapshot.stop_reason || "—";
+    const terminal = TERMINAL_MONITORING_STATUSES.has(String(snapshot.status || ""));
+    monitoringStop.hidden = terminal;
+    monitoringStop.disabled = false;
+
+    const alarmId = String(alarm.alarm_id || "");
+    if (alarmId && alarmId !== lastMonitoringAlarmId) {
+      if (announceAlarm) {
+        const article = append(
+          "assistant",
+          `监控任务发现最新报警：${alarm.risk_level || "未知风险"}。`,
+        );
+        appendAlarmReport(article, extractAlarmReport(alarm));
+      }
+      lastMonitoringAlarmId = alarmId;
+    }
+  }
+
+  function scheduleMonitoringPoll(delay = 2000) {
+    window.clearTimeout(monitoringTimer);
+    monitoringTimer = window.setTimeout(() => pollMonitoring(), delay);
+  }
+
+  async function pollMonitoring(initial = false) {
+    if (monitoringPolling) return;
+    monitoringPolling = true;
+    try {
+      const url = new URL(monitoringEventsEndpoint, window.location.origin);
+      url.searchParams.set("session_id", sessionId);
+      url.searchParams.set("limit", "50");
+      if (monitoringTaskId) url.searchParams.set("task_id", monitoringTaskId);
+      if (monitoringCursor) url.searchParams.set("after_segment_id", monitoringCursor);
+      const response = await fetch(url);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        if (response.status === 404) {
+          localStorage.removeItem(monitoringTaskStorageKey);
+          monitoringTaskId = "";
+          monitoringPanel.hidden = true;
+        }
+        return;
+      }
+      if (!data.found && !data.task_id) {
+        monitoringPanel.hidden = true;
+        return;
+      }
+      if (data.task_id) {
+        monitoringTaskId = String(data.task_id);
+        localStorage.setItem(monitoringTaskStorageKey, monitoringTaskId);
+      }
+      if (data.next_cursor) monitoringCursor = String(data.next_cursor);
+      renderMonitoring(data, { announceAlarm: !initial });
+      if (!TERMINAL_MONITORING_STATUSES.has(String(data.status || ""))) {
+        scheduleMonitoringPoll();
+      } else {
+        localStorage.removeItem(monitoringTaskStorageKey);
+      }
+    } catch (_error) {
+      scheduleMonitoringPoll(5000);
+    } finally {
+      monitoringPolling = false;
+    }
+  }
+
+  function activateMonitoring(taskId) {
+    if (!taskId) return;
+    monitoringTaskId = taskId;
+    monitoringCursor = "";
+    lastMonitoringAlarmId = "";
+    localStorage.setItem(monitoringTaskStorageKey, taskId);
+    scheduleMonitoringPoll(0);
+  }
+
+  async function stopMonitoring() {
+    if (!monitoringTaskId || monitoringStop.disabled) return;
+    monitoringStop.disabled = true;
+    try {
+      const response = await fetch(monitoringStopEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, task_id: monitoringTaskId }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.error || data.reply || "停止失败");
+      append("assistant", data.reply || "已请求停止监控任务。");
+      scheduleMonitoringPoll(0);
+    } catch (error) {
+      append("assistant", `停止监控失败：${error.message}`, true);
+      monitoringStop.disabled = false;
+    }
   }
 
   function setBusy(busy, busyText = "处理中") {
@@ -260,14 +421,27 @@ export function mountAgentChat(root) {
       src: URL.createObjectURL(media),
     } : null;
     const userArticle = append("user", message, false, attachment);
-    const detectionRequested = Boolean(message) && (
+    const monitoringStartRequested = Boolean(message) && (
+      /(?:开始|启动|开启|创建|安排|预约).{0,16}(?:监控|巡检)/.test(message)
+      || /(?:立即|现在)(?:开始)?(?:监控|巡检)/.test(message)
+      || /(?:监控|巡检).*(?:从|到|至|持续|分钟|小时|今天|明天)/.test(message)
+    );
+    const monitoringControlRequested = Boolean(message) && (
+      /(?:查看|查询|显示|获取|停止|终止|结束|取消|关闭).{0,16}(?:监控|巡检|任务)/.test(message)
+      || /(?:监控|巡检|任务).{0,16}(?:状态|停止|终止|结束|取消|关闭)/.test(message)
+    );
+    const detectionRequested = Boolean(message) && !monitoringStartRequested && (
       Boolean(media)
       || (
         /(?:检测|识别|分析|检查|巡检|看看|看一下|跑一下)/.test(message)
         && /(?:图片|图像|照片|视频|这张|这段|这个|监控|摄像头|视频流|实时流|RTSP|monitor)/i.test(message)
       )
     );
-    const pendingText = detectionRequested
+    const pendingText = monitoringStartRequested
+      ? "正在创建监控任务..."
+      : monitoringControlRequested
+        ? "正在处理监控任务..."
+        : detectionRequested
       ? "正在检测..."
       : media && !message
         ? `正在接收${isImage ? "图片" : "视频"}...`
@@ -298,6 +472,8 @@ export function mountAgentChat(root) {
         !data.ok,
       );
       appendAlarmReport(assistantArticle, extractAlarmReport(data.data));
+      const monitoringId = findMonitoringTaskId(data);
+      if (monitoringId) activateMonitoring(monitoringId);
       document.dispatchEvent(new CustomEvent("agent:response", { detail: { data } }));
       if (data.attachment_received) {
         mediaInput.value = "";
@@ -337,6 +513,8 @@ export function mountAgentChat(root) {
     fileLabel.textContent = file ? `已选择：${file.name}` : "";
   });
 
+  monitoringStop?.addEventListener("click", stopMonitoring);
+
   root.querySelectorAll("[data-agent-prompt]").forEach((button) => {
     button.addEventListener("click", () => {
       textarea.value = button.dataset.agentPrompt || "";
@@ -353,6 +531,7 @@ export function mountAgentChat(root) {
   });
 
   loadHistory();
+  pollMonitoring(true);
 }
 
 document.querySelectorAll("[data-agent-chat]").forEach(mountAgentChat);

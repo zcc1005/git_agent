@@ -223,6 +223,12 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
             "用户要求检测、分析或巡检已注册的实时监控源时，必须直接调用 detect-video-source，"
             "不要自行拆成 capture-video-source 与 detect-video。区域名称必须依据 context.video_sources.zones"
             "映射为 zone_id；无法唯一映射时要求澄清，禁止编造 ROI。"
+            "用户明确要求开始、启动、安排或预约一段非全天候监控时，调用 start-monitoring-task；"
+            "必须具有明确结束条件，只能提供 end_time 或 run_duration_seconds 其中一个，最长 24 小时。"
+            "没有结束时间或运行时长时必须要求澄清，不能擅自假设。历史时间区间不能规划为未来监控任务。"
+            "查看、查询或获取监控任务状态时调用 control-monitoring-task 且 action=query；"
+            "用户明确要求停止、终止、结束或取消监控任务时才可输出 action=stop。"
+            "control-monitoring-task.action 只能输出 query 或 stop，禁止输出 view、show、get、status、cancel。"
             "严格遵守每个 Skill 的 input_schema；枚举只输出规范值，数值、布尔值和数组不得写成字符串。"
             "context 明确提供 current_date、current_time、timezone 和 deterministic temporal_resolution。"
             "涉及时间时必须原样使用 temporal_resolution，禁止自行重新计算。绝对区间使用 start_time/end_time，"
@@ -279,8 +285,11 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
                 if kind == "absolute" and skill_name in {
                     "query-history",
                     "generate-risk-report",
+                    "start-monitoring-task",
                 }:
                     arguments.pop("date", None)
+                    if skill_name == "start-monitoring-task":
+                        arguments.pop("run_duration_seconds", None)
                     arguments["start_time"] = temporal_resolution["start_time"]
                     arguments["end_time"] = temporal_resolution["end_time"]
                 if kind == "offset" and skill_name in {

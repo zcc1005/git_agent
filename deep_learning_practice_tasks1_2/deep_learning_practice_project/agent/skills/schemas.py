@@ -372,6 +372,76 @@ DETECT_VIDEO_SOURCE_SCHEMA = _object(
     required=("source_id",),
 )
 
+START_MONITORING_TASK_SCHEMA = _object(
+    {
+        "source_id": deepcopy(PROBE_VIDEO_SOURCE_SCHEMA["properties"]["source_id"]),
+        "start_time": _datetime(
+            "任务计划开始时间，必须包含时区；省略表示立即开始。"
+        ),
+        "end_time": _datetime(
+            "任务计划结束时间，必须包含时区，且最长不超过开始后 24 小时。"
+        ),
+        "run_duration_seconds": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 86400,
+            "description": "从开始时间计算的任务总运行秒数；与 end_time 只能提供一个。",
+        },
+        "capture_duration_seconds": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 3600,
+            "description": (
+                "每轮 RTSP 采集时长；省略时使用视频源 capture_window_seconds。"
+            ),
+        },
+        "interval_seconds": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 86400,
+            "default": 60.0,
+            "description": "一轮检测结束后到下一轮开始前的等待秒数。",
+        },
+        "zone_id": deepcopy(DETECT_VIDEO_SOURCE_SCHEMA["properties"]["zone_id"]),
+        "parameters": deepcopy(DETECT_VIDEO_SOURCE_SCHEMA["properties"]["parameters"]),
+        "max_consecutive_failures": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 3,
+            "description": "连续失败达到该次数后自动终止任务。",
+        },
+    },
+    required=("source_id",),
+)
+
+CONTROL_MONITORING_TASK_SCHEMA = _object(
+    {
+        "action": {
+            "type": "string",
+            "enum": ["query", "stop"],
+            "default": "query",
+            "aliases": {
+                "view": "query",
+                "show": "query",
+                "status": "query",
+                "get": "query",
+                "cancel": "stop",
+            },
+            "description": "query 查看任务；stop 请求在当前轮结束后停止任务。",
+        },
+        "task_id": _string("监控任务 ID。", max_length=128),
+        "source_id": deepcopy(PROBE_VIDEO_SOURCE_SCHEMA["properties"]["source_id"]),
+        "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "查询任务或轮次的最大返回数量。",
+        },
+    }
+)
+
 
 ALL_SKILL_SCHEMAS = {
     "detect-image": DETECT_IMAGE_SCHEMA,
@@ -386,4 +456,6 @@ ALL_SKILL_SCHEMAS = {
     "probe-video-source": PROBE_VIDEO_SOURCE_SCHEMA,
     "capture-video-source": CAPTURE_VIDEO_SOURCE_SCHEMA,
     "detect-video-source": DETECT_VIDEO_SOURCE_SCHEMA,
+    "start-monitoring-task": START_MONITORING_TASK_SCHEMA,
+    "control-monitoring-task": CONTROL_MONITORING_TASK_SCHEMA,
 }

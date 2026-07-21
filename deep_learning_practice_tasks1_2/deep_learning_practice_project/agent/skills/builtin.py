@@ -276,6 +276,76 @@ def _validate_detect_video_source(arguments: Mapping[str, Any]) -> Dict[str, Any
     return values
 
 
+def _parse_aware_datetime(value: Any, label: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{label} 必须是 ISO 8601 时间") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{label} 必须包含时区")
+    return parsed
+
+
+def _validate_start_monitoring_task(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    values = _validate_detect_video_source(arguments)
+    end_time = values.get("end_time")
+    run_duration = values.get("run_duration_seconds")
+    if bool(end_time) == bool(run_duration is not None):
+        raise ValueError("end_time 与 run_duration_seconds 必须且只能提供一个")
+    start = (
+        _parse_aware_datetime(values["start_time"], "start_time")
+        if values.get("start_time")
+        else None
+    )
+    if end_time:
+        end = _parse_aware_datetime(end_time, "end_time")
+        if start and end <= start:
+            raise ValueError("end_time 必须晚于 start_time")
+        if start and (end - start).total_seconds() > 86400:
+            raise ValueError("非全天候监控任务最长为 24 小时")
+    if run_duration is not None:
+        duration = float(run_duration)
+        if not 1 <= duration <= 86400:
+            raise ValueError("run_duration_seconds 必须在 1 到 86400 之间")
+        values["run_duration_seconds"] = duration
+    capture_duration = values.get("capture_duration_seconds")
+    if capture_duration is not None:
+        values["capture_duration_seconds"] = float(capture_duration)
+    values["interval_seconds"] = float(values.get("interval_seconds", 60.0))
+    values["max_consecutive_failures"] = int(
+        values.get("max_consecutive_failures", 3)
+    )
+    return values
+
+
+def _validate_control_monitoring_task(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    values = dict(arguments)
+    action_aliases = {
+        "view": "query",
+        "show": "query",
+        "status": "query",
+        "get": "query",
+        "cancel": "stop",
+    }
+    action = str(values.get("action") or "query").strip().lower()
+    action = action_aliases.get(action, action)
+    if action not in {"query", "stop"}:
+        raise ValueError("action 只能是 query 或 stop")
+    task_id = str(values.get("task_id") or "").strip().lower()
+    if task_id and not re.fullmatch(r"monitor-[a-f0-9]{12}", task_id):
+        raise ValueError("task_id 格式无效")
+    source_id = str(values.get("source_id") or "").strip().lower()
+    if source_id and not VIDEO_SOURCE_ID_PATTERN.fullmatch(source_id):
+        raise ValueError("source_id 格式无效")
+    values["action"] = action
+    if task_id:
+        values["task_id"] = task_id
+    if source_id:
+        values["source_id"] = source_id
+    values["limit"] = int(values.get("limit", 10))
+    return values
+
+
 def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
     registry = SkillRegistry()
 
@@ -472,6 +542,45 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
             ),
             tools.detect_video_source,
             _validate_detect_video_source,
+        )
+    )
+    registry.register(
+        RuntimeSkill(
+            SkillSpec(
+                "start-monitoring-task",
+                (
+                    "为已注册 RTSP 源创建有明确结束条件的非全天候后台监控任务，"
+                    "按轮执行实时检测并在连续失败达到上限时自动停止。"
+                ),
+                required_inputs=("source_id",),
+                optional_inputs=(
+                    "start_time",
+                    "end_time",
+                    "run_duration_seconds",
+                    "capture_duration_seconds",
+                    "interval_seconds",
+                    "zone_id",
+                    "parameters",
+                    "max_consecutive_failures",
+                ),
+                safety="controlled-write",
+                input_schema=ALL_SKILL_SCHEMAS["start-monitoring-task"],
+            ),
+            tools.start_monitoring_task,
+            _validate_start_monitoring_task,
+        )
+    )
+    registry.register(
+        RuntimeSkill(
+            SkillSpec(
+                "control-monitoring-task",
+                "查看或停止当前会话的非全天候监控任务；查看必须使用 query。",
+                optional_inputs=("action", "task_id", "source_id", "limit"),
+                safety="controlled-write",
+                input_schema=ALL_SKILL_SCHEMAS["control-monitoring-task"],
+            ),
+            tools.control_monitoring_task,
+            _validate_control_monitoring_task,
         )
     )
     return registry

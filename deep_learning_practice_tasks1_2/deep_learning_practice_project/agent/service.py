@@ -29,6 +29,7 @@ HELP_TEXT = (
     "还可检查已注册固定监控源的 RTSP 连接状态。"
     "也可从固定监控源采集一个定长本地视频片段。"
     "还可对已注册 RTSP 监控执行单次采集、异物检测、风险研判和报警闭环入库。"
+    "还可创建最长 24 小时的非全天候监控任务，并查询状态或人工停止。"
 )
 MISSING_MEDIA_REPLY = "还没有看到图片/视频，发过来立刻帮你分析。"
 ATTACHMENT_LABELS = {"image": "图片", "video": "视频"}
@@ -41,6 +42,7 @@ PLANNING_HINT = re.compile(
     r"昨天|前天|最近\s*(?:\d+|一|两|半)*(?:分钟|小时|天)|"
     r"第?\s*\d+(?:\.\d+)?\s*分钟|从\s*\d{1,2}[：:]\d{2}\s*检测到|"
     r"风险研判|人工复核|误报|假阳性|闭环|处理完成|"
+    r"开始监控|启动监控|预约监控|停止监控|监控任务|巡检任务|"
     r"并且|然后|同时|随后|再生成|以及)",
     re.I,
 )
@@ -355,8 +357,11 @@ class AgentService:
             if kind == "absolute" and step.skill_name in {
                 "query-history",
                 "generate-risk-report",
+                "start-monitoring-task",
             }:
                 arguments.pop("date", None)
+                if step.skill_name == "start-monitoring-task":
+                    arguments.pop("run_duration_seconds", None)
                 arguments["start_time"] = temporal_resolution["start_time"]
                 arguments["end_time"] = temporal_resolution["end_time"]
             if kind == "offset" and step.skill_name in {
@@ -412,6 +417,15 @@ class AgentService:
     @staticmethod
     def _validate_controlled_steps(message: str, plan: SkillPlan) -> None:
         explicit_intent = RuleBasedIntentRecognizer().recognize(message).intent
+        start_monitoring = re.compile(
+            r"(?:(?:开始|启动|开启|创建|安排|预约).{0,16}(?:监控|巡检)|"
+            r"(?:立即|现在)(?:开始)?(?:监控|巡检)|"
+            r"(?:监控|巡检).*(?:从|到|至|持续|分钟|小时|今天|明天))"
+        )
+        stop_monitoring = re.compile(
+            r"(?:(?:停止|终止|结束|取消|关闭).{0,16}(?:监控|巡检|任务)|"
+            r"(?:监控|巡检|任务).{0,16}(?:停止|终止|结束|取消|关闭)|不再监控|别监控了)"
+        )
         review_patterns = {
             "confirm": re.compile(r"(?:确认|认定).*(?:检测|结果|异物)"),
             "reject": re.compile(r"(?:驳回|误报|假阳性|不是异物)"),
@@ -430,6 +444,12 @@ class AgentService:
             if step.skill_name == "review-detection" and action in review_patterns:
                 if not review_patterns[action].search(message):
                     raise SkillPlanningError("检测复核写操作必须来自用户的明确动作指令")
+            if step.skill_name == "start-monitoring-task":
+                if not start_monitoring.search(message):
+                    raise SkillPlanningError("启动监控任务必须来自用户明确的开始或安排监控指令")
+            if step.skill_name == "control-monitoring-task" and action == "stop":
+                if not stop_monitoring.search(message):
+                    raise SkillPlanningError("停止监控任务必须来自用户明确的停止指令")
 
     def chat(
         self,
