@@ -323,6 +323,30 @@ class OpenAICompatiblePlannerTests(unittest.TestCase):
         self.assertEqual(arguments["start_time"], temporal["start_time"])
         self.assertEqual(arguments["end_time"], temporal["end_time"])
 
+    def test_archived_detection_receives_deterministic_absolute_window(self) -> None:
+        payload = {
+            "steps": [
+                {
+                    "skill_name": "detect-archived-video",
+                    "arguments": {"source_id": "main-monitor"},
+                }
+            ]
+        }
+        temporal = {
+            "kind": "absolute",
+            "start_time": "2026-07-21T08:00:00+08:00",
+            "end_time": "2026-07-21T09:00:00+08:00",
+        }
+
+        normalized = OpenAICompatibleSkillPlanner._apply_temporal_resolution_to_payload(
+            payload,
+            temporal,
+        )
+        arguments = normalized["steps"][0]["arguments"]
+
+        self.assertEqual(arguments["start_time"], temporal["start_time"])
+        self.assertEqual(arguments["end_time"], temporal["end_time"])
+
     def test_env_factory_links_model_planner_to_agent_service(self) -> None:
         def transport(url, body, headers, timeout):
             del url, body, headers, timeout

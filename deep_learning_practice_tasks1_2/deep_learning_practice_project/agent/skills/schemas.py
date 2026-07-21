@@ -442,6 +442,65 @@ CONTROL_MONITORING_TASK_SCHEMA = _object(
     }
 )
 
+CONTROL_STREAM_ARCHIVE_SCHEMA = _object(
+    {
+        "action": {
+            "type": "string",
+            "enum": ["start", "stop", "query"],
+            "default": "query",
+            "aliases": {
+                "view": "query",
+                "show": "query",
+                "status": "query",
+                "get": "query",
+                "cancel": "stop",
+            },
+            "description": "start 启动持续录像；stop 在当前片段结束后停止；query 查看状态。",
+        },
+        "source_id": deepcopy(PROBE_VIDEO_SOURCE_SCHEMA["properties"]["source_id"]),
+        "segment_seconds": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 3600,
+            "default": 60.0,
+            "description": "每个历史录像片段的目标时长（秒）。",
+        },
+        "retention_hours": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 720,
+            "default": 24.0,
+            "description": "历史录像保留小时数；超期片段会安全删除。",
+        },
+        "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100,
+            "description": "query 返回的最近片段上限。",
+        },
+    },
+    required=("source_id",),
+)
+
+DETECT_ARCHIVED_VIDEO_SCHEMA = _object(
+    {
+        "source_id": deepcopy(PROBE_VIDEO_SOURCE_SCHEMA["properties"]["source_id"]),
+        "start_time": _datetime("历史录像请求开始时间，必须包含时区。"),
+        "end_time": _datetime("历史录像请求结束时间，必须包含时区且不得晚于当前时间。"),
+        "zone_id": deepcopy(DETECT_VIDEO_SOURCE_SCHEMA["properties"]["zone_id"]),
+        "parameters": deepcopy(DETECT_VIDEO_SOURCE_SCHEMA["properties"]["parameters"]),
+        "coverage_tolerance_seconds": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10,
+            "default": 2.0,
+            "description": "相邻录像片段边界允许的最大时间误差（秒）。",
+        },
+    },
+    required=("source_id", "start_time", "end_time"),
+)
+
 
 ALL_SKILL_SCHEMAS = {
     "detect-image": DETECT_IMAGE_SCHEMA,
@@ -458,4 +517,6 @@ ALL_SKILL_SCHEMAS = {
     "detect-video-source": DETECT_VIDEO_SOURCE_SCHEMA,
     "start-monitoring-task": START_MONITORING_TASK_SCHEMA,
     "control-monitoring-task": CONTROL_MONITORING_TASK_SCHEMA,
+    "control-stream-archive": CONTROL_STREAM_ARCHIVE_SCHEMA,
+    "detect-archived-video": DETECT_ARCHIVED_VIDEO_SCHEMA,
 }

@@ -22,6 +22,8 @@ from agent.video_sources import (
 from project_config import OUTPUTS_DIR, PROJECT_ROOT, YOLO_MODEL_PATH
 from storage import AlarmRecord, SQLiteHistoryStore
 
+from .archive import HistoricalStreamArchiveManager
+
 
 @dataclass(frozen=True)
 class VideoDetectionOutcome:
@@ -114,6 +116,7 @@ class AgentTools:
         stream_capture_runner: Optional[StreamCaptureRunner] = None,
         video_source_registry_loader: Optional[VideoSourceRegistryLoader] = None,
         monitoring_manager: Optional[MonitoringTaskManager] = None,
+        archive_manager: Optional[HistoricalStreamArchiveManager] = None,
         now: Optional[Callable[[], datetime]] = None,
     ) -> None:
         self.store = store
@@ -135,6 +138,11 @@ class AgentTools:
         self._monitoring_manager = monitoring_manager or MonitoringTaskManager(
             self.store,
             self.detect_video_source,
+            now=self._now,
+        )
+        self._archive_manager = archive_manager or HistoricalStreamArchiveManager(
+            self.store,
+            self.capture_video_source,
             now=self._now,
         )
 
@@ -702,6 +710,301 @@ class AgentTools:
             "data": {
                 **task.to_dict(),
                 "monitoring_job": job.to_dict() if job else {},
+            },
+        }
+
+    def control_stream_archive(
+        self,
+        session_id: str,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        del session_id
+        action = str(context.get("action") or "query").strip().lower()
+        source_id = str(context.get("source_id") or "").strip().lower()
+        try:
+            registry = self._video_source_registry_loader()
+            source = registry.get(source_id)
+        except (FileNotFoundError, ValueError):
+            return {
+                "ok": False,
+                "error_code": "configuration_error",
+                "reply": "视频源注册表尚未正确配置。",
+                "data": {},
+            }
+        except LookupError:
+            return {
+                "ok": False,
+                "error_code": "source_not_found",
+                "reply": f"未找到已注册的视频源：{source_id}",
+                "data": {},
+            }
+        if not source.is_rtsp or source.stream is None:
+            return {
+                "ok": False,
+                "error_code": "not_rtsp_source",
+                "reply": f"{source.display_name}不是 RTSP 视频源，无法持续归档。",
+                "data": {},
+            }
+
+        if action == "start":
+            segment_seconds = float(
+                context.get("segment_seconds") or source.stream.segment_seconds
+            )
+            retention_seconds = float(context.get("retention_hours", 24.0)) * 3600.0
+            try:
+                state = self._archive_manager.start(
+                    source.source_id,
+                    segment_seconds=segment_seconds,
+                    retention_seconds=retention_seconds,
+                )
+            except ValueError as exc:
+                return {
+                    "ok": False,
+                    "error_code": "invalid_archive_config",
+                    "reply": str(exc),
+                    "data": {},
+                }
+            return {
+                "ok": True,
+                "reply": (
+                    f"已启动{source.display_name}录像归档：每 {segment_seconds:g} 秒保存一段，"
+                    f"保留 {retention_seconds / 3600:g} 小时。"
+                ),
+                "data": {
+                    **state.to_dict(),
+                    "display_name": source.display_name,
+                    "line_id": source.line_id,
+                    "manifest_path": self._display_path(
+                        self._archive_manager.manifest_path(source.source_id)
+                    ),
+                },
+            }
+
+        if action == "stop":
+            try:
+                state = self._archive_manager.stop(source.source_id)
+            except LookupError as exc:
+                return {
+                    "ok": False,
+                    "error_code": "archive_not_found",
+                    "reply": str(exc),
+                    "data": {},
+                }
+            return {
+                "ok": True,
+                "reply": f"已请求停止{source.display_name}录像归档；当前片段完成后停止。",
+                "data": state.to_dict(),
+            }
+
+        state = self.store.get_stream_archive_state(source.source_id)
+        if state is None:
+            return {
+                "ok": True,
+                "reply": f"{source.display_name}尚未启动录像归档。",
+                "data": {
+                    "found": False,
+                    "source_id": source.source_id,
+                    "display_name": source.display_name,
+                },
+            }
+        limit = int(context.get("limit", 100))
+        segments = self.store.list_stream_archive_segments(
+            source.source_id,
+            statuses=("ready", "failed"),
+            limit=limit,
+        )
+        return {
+            "ok": True,
+            "reply": (
+                f"{source.display_name}录像归档状态为 {state.status}，"
+                f"当前索引返回 {len(segments)} 个片段。"
+            ),
+            "data": {
+                "found": True,
+                **state.to_dict(),
+                "display_name": source.display_name,
+                "line_id": source.line_id,
+                "manifest_path": self._display_path(
+                    self._archive_manager.manifest_path(source.source_id)
+                ),
+                "segments": [
+                    {
+                        **segment.to_dict(),
+                        "video_path": self._display_path(Path(segment.video_path)),
+                    }
+                    for segment in segments
+                ],
+            },
+        }
+
+    def detect_archived_video(
+        self,
+        session_id: str,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        source_id = str(context.get("source_id") or "").strip().lower()
+        try:
+            registry = self._video_source_registry_loader()
+            source = registry.get(source_id)
+        except (FileNotFoundError, ValueError):
+            return {
+                "ok": False,
+                "error_code": "configuration_error",
+                "reply": "视频源注册表尚未正确配置。",
+                "data": {},
+            }
+        except LookupError:
+            return {
+                "ok": False,
+                "error_code": "source_not_found",
+                "reply": f"未找到已注册的视频源：{source_id}",
+                "data": {},
+            }
+
+        start = datetime.fromisoformat(
+            str(context["start_time"]).replace("Z", "+00:00")
+        )
+        end = datetime.fromisoformat(str(context["end_time"]).replace("Z", "+00:00"))
+        if end > self.current_time():
+            return {
+                "ok": False,
+                "error_code": "archive_range_in_future",
+                "reply": "历史录像检测的结束时间不能晚于当前时间；实时画面请使用实时检测或监控任务。",
+                "data": {
+                    "requested_range": {
+                        "start_time": start.isoformat(),
+                        "end_time": end.isoformat(),
+                    }
+                },
+            }
+
+        parameters = dict(context.get("parameters") or {})
+        zone_id = str(context.get("zone_id") or "").strip().lower()
+        selected_zone: Dict[str, Any] = {}
+        if zone_id:
+            zone = next((item for item in source.zones if item.zone_id == zone_id), None)
+            if zone is None:
+                return {
+                    "ok": False,
+                    "error_code": "zone_not_found",
+                    "reply": f"视频源 {source.display_name} 未注册区域：{zone_id}",
+                    "data": {"available_zones": [item.zone_id for item in source.zones]},
+                }
+            parameters["roi"] = list(zone.roi)
+            selected_zone = {
+                "zone_id": zone.zone_id,
+                "display_name": zone.display_name,
+                "roi": list(zone.roi),
+            }
+
+        coverage = self._archive_manager.resolve_range(
+            source.source_id,
+            start_time=start,
+            end_time=end,
+            tolerance_seconds=float(context.get("coverage_tolerance_seconds", 2.0)),
+        )
+        if coverage.missing_segments:
+            return {
+                "ok": False,
+                "error_code": "archive_segment_missing",
+                "reply": "历史录像索引存在，但部分录像文件已缺失，已拒绝用实时画面替代。",
+                "data": coverage.to_dict(),
+            }
+        if coverage.gaps:
+            return {
+                "ok": False,
+                "error_code": "archive_coverage_gap",
+                "reply": "请求时段的历史录像覆盖不完整，已拒绝用实时画面替代。",
+                "data": coverage.to_dict(),
+            }
+
+        segment_results: list[Dict[str, Any]] = []
+        class_counts: Dict[str, int] = {}
+        event_frames: list[Dict[str, Any]] = []
+        reports: list[str] = []
+        risk_rank = {"none": 0, "low": 1, "medium": 2, "high": 3}
+        overall_risk = "none"
+        total_events = 0
+        for segment in coverage.segments:
+            segment_start = datetime.fromisoformat(segment.started_at)
+            segment_end = datetime.fromisoformat(segment.ended_at)
+            start_offset = max(0.0, (start - segment_start).total_seconds())
+            clipped_end = min(end, segment_end)
+            end_offset = max(start_offset, (clipped_end - segment_start).total_seconds())
+            video_path = Path(segment.video_path)
+            if not video_path.is_absolute():
+                video_path = PROJECT_ROOT / video_path
+            detection_context: Dict[str, Any] = {
+                "video_path": str(video_path),
+                "video_start_time": segment.started_at,
+                "source_ended_at": clipped_end.isoformat(timespec="seconds"),
+                "line_id": source.line_id,
+                "parameters": parameters,
+            }
+            if start_offset > 0.001:
+                detection_context["start_offset_seconds"] = start_offset
+            if clipped_end < segment_end - timedelta(milliseconds=1):
+                detection_context["end_offset_seconds"] = end_offset
+            result = self.detect_video(session_id, detection_context)
+            data = dict(result.get("data") or {})
+            segment_results.append(
+                {
+                    "segment_id": segment.segment_id,
+                    "started_at": segment.started_at,
+                    "ended_at": segment.ended_at,
+                    "start_offset_seconds": start_offset,
+                    "end_offset_seconds": end_offset,
+                    **result,
+                }
+            )
+            if not result.get("ok"):
+                return {
+                    "ok": False,
+                    "error_code": str(result.get("error_code") or "historical_detection_failed"),
+                    "reply": result.get("reply") or "历史录像检测执行失败。",
+                    "data": {
+                        **coverage.to_dict(),
+                        "segment_results": segment_results,
+                    },
+                }
+            total_events += int(data.get("event_count") or 0)
+            risk = str(data.get("risk_level") or "none")
+            if risk_rank.get(risk, 0) > risk_rank.get(overall_risk, 0):
+                overall_risk = risk
+            for name, count in dict(data.get("class_counts") or {}).items():
+                class_counts[str(name)] = class_counts.get(str(name), 0) + int(count)
+            for frame in data.get("event_frames") or []:
+                if isinstance(frame, Mapping):
+                    event_frames.append(dict(frame))
+            report = str(data.get("alarm_report") or "").strip()
+            if report:
+                reports.append(report)
+
+        return {
+            "ok": True,
+            "reply": (
+                f"{source.display_name}历史录像检测完成：覆盖 {len(coverage.segments)} 个录像片段，"
+                f"发现 {total_events} 个异物事件，总体为{RISK_NAMES.get(overall_risk, overall_risk)}。"
+            ),
+            "data": {
+                **coverage.to_dict(),
+                "display_name": source.display_name,
+                "line_id": source.line_id,
+                "zone": selected_zone,
+                "risk_level": overall_risk,
+                "event_count": total_events,
+                "class_counts": class_counts,
+                "alarm_report": "\n\n".join(reports),
+                "event_frames": event_frames,
+                "segment_results": segment_results,
+                "workflow": [
+                    "lookup-archive-segments",
+                    "verify-archive-coverage",
+                    "detect-video",
+                    "assess-risk",
+                    "persist-history",
+                    "create-alarm",
+                ],
             },
         }
 

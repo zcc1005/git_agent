@@ -87,6 +87,29 @@ class FakeAgentService:
                     },
                 },
             }
+        if skill_name == "control-stream-archive":
+            action = arguments.get("action")
+            status = {"start": "starting", "stop": "stopping"}.get(action, "running")
+            return {
+                "skill_name": skill_name,
+                "ok": True,
+                "reply": "录像归档操作完成。",
+                "data": {
+                    "found": True,
+                    "source_id": arguments.get("source_id", "main-monitor"),
+                    "status": status,
+                    "segment_seconds": arguments.get("segment_seconds", 60),
+                    "retention_hours": arguments.get("retention_hours", 24),
+                    "segments": [
+                        {
+                            "segment_id": "archive-segment-1",
+                            "status": "ready",
+                            "started_at": "2026-07-21T00:00:00+00:00",
+                            "ended_at": "2026-07-21T00:01:00+00:00",
+                        }
+                    ],
+                },
+            }
         if skill_name != "control-monitoring-task":
             raise AssertionError(f"unexpected skill: {skill_name}")
         if arguments.get("action") == "stop":
@@ -408,6 +431,52 @@ class AgentWebIntegrationTests(unittest.TestCase):
 
         self.assertEqual(invalid_start.status_code, 400)
         self.assertEqual(invalid_events.status_code, 400)
+
+    def test_archive_start_stop_status_and_segments_use_archive_skill(self) -> None:
+        started = self.client.post(
+            "/api/agent/archive/start",
+            json={
+                "session_id": "web-session",
+                "source_id": "main-monitor",
+                "segment_seconds": 60,
+                "retention_hours": 24,
+            },
+        )
+        status = self.client.get(
+            "/api/agent/archive/status?session_id=web-session&source_id=main-monitor"
+        )
+        segments = self.client.get(
+            "/api/agent/archive/segments?session_id=web-session&source_id=main-monitor&limit=50"
+        )
+        stopped = self.client.post(
+            "/api/agent/archive/stop",
+            json={"session_id": "web-session", "source_id": "main-monitor"},
+        )
+
+        self.assertEqual(started.status_code, 200)
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(segments.status_code, 200)
+        self.assertEqual(stopped.status_code, 200)
+        self.assertEqual(segments.get_json()["data"]["segments"][0]["status"], "ready")
+        archive_calls = [
+            call
+            for call in self.service.skill_calls
+            if call["skill_name"] == "control-stream-archive"
+        ]
+        self.assertEqual(
+            [call["arguments"]["action"] for call in archive_calls],
+            ["start", "query", "query", "stop"],
+        )
+
+    def test_archive_api_rejects_rtsp_url_and_missing_source_id(self) -> None:
+        invalid_start = self.client.post(
+            "/api/agent/archive/start",
+            json={"source_id": "main-monitor", "rtsp_url": "rtsp://secret/live"},
+        )
+        missing_source = self.client.get("/api/agent/archive/status")
+
+        self.assertEqual(invalid_start.status_code, 400)
+        self.assertEqual(missing_source.status_code, 400)
 
 
 if __name__ == "__main__":

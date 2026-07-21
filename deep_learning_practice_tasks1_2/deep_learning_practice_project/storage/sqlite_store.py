@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional
 
 
 VALID_ALARM_STATUSES = {"inactive", "pending", "confirmed", "cancelled"}
@@ -34,6 +34,14 @@ VALID_MONITORING_JOB_STATUSES = {
     "cancelled",
 }
 VALID_STREAM_SEGMENT_STATUSES = {"pending", "processing", "completed", "failed"}
+VALID_STREAM_ARCHIVE_STATUSES = {
+    "stopped",
+    "starting",
+    "running",
+    "stopping",
+    "failed",
+}
+VALID_STREAM_ARCHIVE_SEGMENT_STATUSES = {"recording", "ready", "failed", "deleted"}
 MONITORING_TASK_TO_JOB_STATUS = {
     "scheduled": "pending",
     "running": "running",
@@ -239,6 +247,59 @@ class StreamSegmentRecord:
         }
 
 
+@dataclass(frozen=True)
+class StreamArchiveStateRecord:
+    source_id: str
+    status: str
+    segment_seconds: float
+    retention_seconds: float
+    last_segment_at: str
+    last_error: str
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source_id": self.source_id,
+            "status": self.status,
+            "segment_seconds": self.segment_seconds,
+            "retention_seconds": self.retention_seconds,
+            "retention_hours": self.retention_seconds / 3600.0,
+            "last_segment_at": self.last_segment_at,
+            "last_error": self.last_error,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass(frozen=True)
+class StreamArchiveSegmentRecord:
+    segment_id: str
+    source_id: str
+    video_path: str
+    started_at: str
+    ended_at: str
+    duration_seconds: float
+    status: str
+    metadata: Dict[str, Any]
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "segment_id": self.segment_id,
+            "source_id": self.source_id,
+            "video_path": self.video_path,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "duration_seconds": self.duration_seconds,
+            "status": self.status,
+            "metadata": self.metadata,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
 class SQLiteHistoryStore:
     """Small SQLite repository used by the agent and future Web API.
 
@@ -429,6 +490,35 @@ class SQLiteHistoryStore:
                     UNIQUE(task_id, source_id, started_at, ended_at)
                 );
 
+                CREATE TABLE IF NOT EXISTS stream_archive_state (
+                    source_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL CHECK (
+                        status IN ('stopped', 'starting', 'running', 'stopping', 'failed')
+                    ),
+                    segment_seconds REAL NOT NULL CHECK (segment_seconds >= 1),
+                    retention_seconds REAL NOT NULL CHECK (retention_seconds >= 3600),
+                    last_segment_at TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS stream_archive_segments (
+                    segment_id TEXT PRIMARY KEY,
+                    source_id TEXT NOT NULL,
+                    video_path TEXT NOT NULL DEFAULT '',
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT NOT NULL,
+                    duration_seconds REAL NOT NULL CHECK (duration_seconds >= 0),
+                    status TEXT NOT NULL CHECK (
+                        status IN ('recording', 'ready', 'failed', 'deleted')
+                    ),
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(source_id, started_at, ended_at)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_messages_session_created
                     ON messages(session_id, created_at, id);
                 CREATE INDEX IF NOT EXISTS idx_detection_session_created
@@ -451,6 +541,13 @@ class SQLiteHistoryStore:
                     ON stream_segments(detection_id);
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_stream_segments_video_path
                     ON stream_segments(video_path)
+                    WHERE video_path <> '';
+                CREATE INDEX IF NOT EXISTS idx_archive_segments_source_time
+                    ON stream_archive_segments(source_id, started_at, ended_at);
+                CREATE INDEX IF NOT EXISTS idx_archive_segments_source_status
+                    ON stream_archive_segments(source_id, status, ended_at DESC);
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_archive_segments_video_path
+                    ON stream_archive_segments(video_path)
                     WHERE video_path <> '';
                 """
             )
@@ -1707,3 +1804,266 @@ class SQLiteHistoryStore:
                 """
             )
             return int(cursor.rowcount)
+
+    @staticmethod
+    def _stream_archive_state_from_row(row: sqlite3.Row) -> StreamArchiveStateRecord:
+        return StreamArchiveStateRecord(
+            source_id=str(row["source_id"]),
+            status=str(row["status"]),
+            segment_seconds=float(row["segment_seconds"]),
+            retention_seconds=float(row["retention_seconds"]),
+            last_segment_at=str(row["last_segment_at"]),
+            last_error=str(row["last_error"]),
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _stream_archive_segment_from_row(
+        row: sqlite3.Row,
+    ) -> StreamArchiveSegmentRecord:
+        return StreamArchiveSegmentRecord(
+            segment_id=str(row["segment_id"]),
+            source_id=str(row["source_id"]),
+            video_path=str(row["video_path"]),
+            started_at=str(row["started_at"]),
+            ended_at=str(row["ended_at"]),
+            duration_seconds=float(row["duration_seconds"]),
+            status=str(row["status"]),
+            metadata=dict(_json_load(row["metadata_json"])),
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+        )
+
+    def upsert_stream_archive_state(
+        self,
+        source_id: str,
+        *,
+        status: str,
+        segment_seconds: float,
+        retention_seconds: float,
+        last_segment_at: str = "",
+        last_error: str = "",
+    ) -> StreamArchiveStateRecord:
+        if status not in VALID_STREAM_ARCHIVE_STATUSES:
+            raise ValueError(f"无效录像归档状态：{status}")
+        if float(segment_seconds) < 1:
+            raise ValueError("segment_seconds 必须不小于 1")
+        if float(retention_seconds) < 3600:
+            raise ValueError("retention_seconds 必须不小于 3600")
+        timestamp = self._timestamp()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO stream_archive_state(
+                    source_id, status, segment_seconds, retention_seconds,
+                    last_segment_at, last_error, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_id) DO UPDATE SET
+                    status = excluded.status,
+                    segment_seconds = excluded.segment_seconds,
+                    retention_seconds = excluded.retention_seconds,
+                    last_segment_at = CASE
+                        WHEN excluded.last_segment_at <> '' THEN excluded.last_segment_at
+                        ELSE stream_archive_state.last_segment_at
+                    END,
+                    last_error = excluded.last_error,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    source_id,
+                    status,
+                    float(segment_seconds),
+                    float(retention_seconds),
+                    last_segment_at,
+                    last_error,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM stream_archive_state WHERE source_id = ?",
+                (source_id,),
+            ).fetchone()
+        return self._stream_archive_state_from_row(row)
+
+    def update_stream_archive_state(
+        self,
+        source_id: str,
+        **changes: Any,
+    ) -> StreamArchiveStateRecord:
+        allowed = {"status", "last_segment_at", "last_error"}
+        unknown = sorted(set(changes) - allowed)
+        if unknown:
+            raise ValueError(f"不支持的录像归档状态字段：{', '.join(unknown)}")
+        if changes.get("status") and changes["status"] not in VALID_STREAM_ARCHIVE_STATUSES:
+            raise ValueError(f"无效录像归档状态：{changes['status']}")
+        changes["updated_at"] = self._timestamp()
+        assignments = ", ".join(f"{name} = ?" for name in changes)
+        parameters = [changes[name] for name in changes] + [source_id]
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"UPDATE stream_archive_state SET {assignments} WHERE source_id = ?",
+                tuple(parameters),
+            )
+            if cursor.rowcount == 0:
+                raise LookupError(f"找不到录像归档状态：{source_id}")
+            row = connection.execute(
+                "SELECT * FROM stream_archive_state WHERE source_id = ?",
+                (source_id,),
+            ).fetchone()
+        return self._stream_archive_state_from_row(row)
+
+    def get_stream_archive_state(
+        self, source_id: str
+    ) -> Optional[StreamArchiveStateRecord]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM stream_archive_state WHERE source_id = ?",
+                (source_id,),
+            ).fetchone()
+        return self._stream_archive_state_from_row(row) if row else None
+
+    def list_stream_archive_states(self) -> List[StreamArchiveStateRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM stream_archive_state ORDER BY source_id"
+            ).fetchall()
+        return [self._stream_archive_state_from_row(row) for row in rows]
+
+    def record_stream_archive_segment(
+        self,
+        source_id: str,
+        *,
+        started_at: str | datetime,
+        ended_at: str | datetime,
+        status: str,
+        video_path: str = "",
+        duration_seconds: float = 0.0,
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> StreamArchiveSegmentRecord:
+        if status not in VALID_STREAM_ARCHIVE_SEGMENT_STATUSES:
+            raise ValueError(f"无效录像片段状态：{status}")
+        normalized_start = _normalized_utc_time(started_at, "started_at")
+        normalized_end = _normalized_utc_time(ended_at, "ended_at")
+        if normalized_end <= normalized_start:
+            raise ValueError("ended_at 必须晚于 started_at")
+        identity = f"{source_id}|{normalized_start}|{normalized_end}"
+        segment_id = f"archive-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:16]}"
+        timestamp = self._timestamp()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO stream_archive_segments(
+                    segment_id, source_id, video_path, started_at, ended_at,
+                    duration_seconds, status, metadata_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_id, started_at, ended_at) DO UPDATE SET
+                    video_path = CASE
+                        WHEN excluded.video_path <> '' THEN excluded.video_path
+                        ELSE stream_archive_segments.video_path
+                    END,
+                    duration_seconds = excluded.duration_seconds,
+                    status = excluded.status,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    segment_id,
+                    source_id,
+                    str(video_path),
+                    normalized_start,
+                    normalized_end,
+                    max(0.0, float(duration_seconds)),
+                    status,
+                    _json_dump(dict(metadata or {})),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            row = connection.execute(
+                """
+                SELECT * FROM stream_archive_segments
+                WHERE source_id = ? AND started_at = ? AND ended_at = ?
+                """,
+                (source_id, normalized_start, normalized_end),
+            ).fetchone()
+        return self._stream_archive_segment_from_row(row)
+
+    def list_stream_archive_segments(
+        self,
+        source_id: str,
+        *,
+        start_time: str | datetime | None = None,
+        end_time: str | datetime | None = None,
+        statuses: tuple[str, ...] = (),
+        limit: int = 10000,
+    ) -> List[StreamArchiveSegmentRecord]:
+        if limit < 1:
+            return []
+        unknown = set(statuses) - VALID_STREAM_ARCHIVE_SEGMENT_STATUSES
+        if unknown:
+            raise ValueError(f"无效录像片段状态：{', '.join(sorted(unknown))}")
+        query = "SELECT * FROM stream_archive_segments WHERE source_id = ?"
+        parameters: List[Any] = [source_id]
+        if start_time is not None:
+            normalized_start = _normalized_utc_time(start_time, "start_time")
+            query += " AND ended_at > ?"
+            parameters.append(normalized_start)
+        if end_time is not None:
+            normalized_end = _normalized_utc_time(end_time, "end_time")
+            query += " AND started_at < ?"
+            parameters.append(normalized_end)
+        if statuses:
+            placeholders = ",".join("?" for _ in statuses)
+            query += f" AND status IN ({placeholders})"
+            parameters.extend(statuses)
+        query += " ORDER BY started_at ASC, segment_id ASC LIMIT ?"
+        parameters.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(parameters)).fetchall()
+        return [self._stream_archive_segment_from_row(row) for row in rows]
+
+    def mark_stream_archive_segment_deleted(
+        self, segment_id: str
+    ) -> StreamArchiveSegmentRecord:
+        timestamp = self._timestamp()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE stream_archive_segments
+                SET status = 'deleted', updated_at = ?
+                WHERE segment_id = ?
+                """,
+                (timestamp, segment_id),
+            )
+            if cursor.rowcount == 0:
+                raise LookupError(f"找不到录像片段：{segment_id}")
+            row = connection.execute(
+                "SELECT * FROM stream_archive_segments WHERE segment_id = ?",
+                (segment_id,),
+            ).fetchone()
+        return self._stream_archive_segment_from_row(row)
+
+    def recover_active_stream_archives(self) -> int:
+        timestamp = self._timestamp()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE stream_archive_state
+                SET status = 'failed',
+                    last_error = '应用进程已重启，录像归档未自动恢复。',
+                    updated_at = ?
+                WHERE status IN ('starting', 'running', 'stopping')
+                """,
+                (timestamp,),
+            )
+            connection.execute(
+                """
+                UPDATE stream_archive_segments
+                SET status = 'failed', updated_at = ?
+                WHERE status = 'recording'
+                """,
+                (timestamp,),
+            )
+        return int(cursor.rowcount)

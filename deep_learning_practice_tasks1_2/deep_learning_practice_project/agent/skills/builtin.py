@@ -346,6 +346,41 @@ def _validate_control_monitoring_task(arguments: Mapping[str, Any]) -> Dict[str,
     return values
 
 
+def _validate_control_stream_archive(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    values = _validate_probe_video_source(arguments)
+    aliases = {
+        "view": "query",
+        "show": "query",
+        "status": "query",
+        "get": "query",
+        "cancel": "stop",
+    }
+    action = str(values.get("action") or "query").strip().lower()
+    action = aliases.get(action, action)
+    if action not in {"start", "stop", "query"}:
+        raise ValueError("action 只能是 start、stop 或 query")
+    values["action"] = action
+    values["segment_seconds"] = float(values.get("segment_seconds", 60.0))
+    values["retention_hours"] = float(values.get("retention_hours", 24.0))
+    values["limit"] = int(values.get("limit", 100))
+    return values
+
+
+def _validate_detect_archived_video(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    values = _validate_detect_video_source(arguments)
+    start = _parse_aware_datetime(values.get("start_time"), "start_time")
+    end = _parse_aware_datetime(values.get("end_time"), "end_time")
+    if end <= start:
+        raise ValueError("end_time 必须晚于 start_time")
+    values["start_time"] = start.isoformat(timespec="seconds")
+    values["end_time"] = end.isoformat(timespec="seconds")
+    values.pop("duration_seconds", None)
+    values["coverage_tolerance_seconds"] = float(
+        values.get("coverage_tolerance_seconds", 2.0)
+    )
+    return values
+
+
 def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
     registry = SkillRegistry()
 
@@ -581,6 +616,50 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
             ),
             tools.control_monitoring_task,
             _validate_control_monitoring_task,
+        )
+    )
+    registry.register(
+        RuntimeSkill(
+            SkillSpec(
+                "control-stream-archive",
+                (
+                    "启动、停止或查询已注册 RTSP 视频源的持续历史录像归档。"
+                    "查看状态必须使用 query；持续归档只采集，不运行 YOLO。"
+                ),
+                required_inputs=("source_id",),
+                optional_inputs=(
+                    "action",
+                    "segment_seconds",
+                    "retention_hours",
+                    "limit",
+                ),
+                safety="controlled-write",
+                input_schema=ALL_SKILL_SCHEMAS["control-stream-archive"],
+            ),
+            tools.control_stream_archive,
+            _validate_control_stream_archive,
+        )
+    )
+    registry.register(
+        RuntimeSkill(
+            SkillSpec(
+                "detect-archived-video",
+                (
+                    "按带时区的绝对时间范围查找已归档监控录像，验证覆盖完整性，"
+                    "裁剪边界片段并复用现有视频检测、风险研判、报警和历史入库。"
+                    "录像有缺口或文件缺失时必须拒绝检测，不能用当前实时画面替代。"
+                ),
+                required_inputs=("source_id", "start_time", "end_time"),
+                optional_inputs=(
+                    "zone_id",
+                    "parameters",
+                    "coverage_tolerance_seconds",
+                ),
+                safety="local-write",
+                input_schema=ALL_SKILL_SCHEMAS["detect-archived-video"],
+            ),
+            tools.detect_archived_video,
+            _validate_detect_archived_video,
         )
     )
     return registry

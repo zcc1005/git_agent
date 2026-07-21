@@ -1,0 +1,4 @@
+interface:
+  display_name: "检测历史监控录像"
+  short_description: "按带时区的绝对时间范围检索并检测已归档的监控录像片段"
+  default_prompt: "查找指定监控源的历史录像，验证时间覆盖后复用现有视频检测链路。"

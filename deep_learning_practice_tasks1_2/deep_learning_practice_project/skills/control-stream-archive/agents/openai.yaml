@@ -1,0 +1,4 @@
+interface:
+  display_name: "控制历史录像归档"
+  short_description: "启动、停止或查询已注册 RTSP 监控源的历史录像归档状态"
+  default_prompt: "管理已注册监控源的持续录像归档，并严格使用规范动作参数。"

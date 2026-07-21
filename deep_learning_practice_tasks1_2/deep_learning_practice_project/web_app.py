@@ -496,6 +496,8 @@ def _monitoring_request_body() -> Dict[str, Any]:
         "run_duration_seconds",
         "capture_duration_seconds",
         "interval_seconds",
+        "segment_seconds",
+        "retention_hours",
     ):
         if name in payload:
             payload[name] = float(payload[name])
@@ -510,9 +512,19 @@ def _monitoring_http_status(result: Mapping[str, Any]) -> int:
     if result.get("ok"):
         return 200
     error_code = str(result.get("error_code") or "")
-    if error_code in {"task_not_found", "source_not_found", "zone_not_found"}:
+    if error_code in {
+        "task_not_found",
+        "source_not_found",
+        "zone_not_found",
+        "archive_not_found",
+    }:
         return 404
-    if error_code in {"invalid_arguments", "invalid_schedule"}:
+    if error_code in {
+        "invalid_arguments",
+        "invalid_schedule",
+        "invalid_archive_config",
+        "archive_range_in_future",
+    }:
         return 400
     return 409
 
@@ -833,6 +845,89 @@ def api_agent_monitoring_start():
             },
         }
         return jsonify(body), _monitoring_http_status(result)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.post("/api/agent/archive/start")
+def api_agent_archive_start():
+    try:
+        payload = _monitoring_request_body()
+        allowed = {"session_id", "source_id", "segment_seconds", "retention_hours"}
+        unknown = sorted(set(payload) - allowed)
+        if unknown:
+            raise ValueError(f"请求包含不支持的字段：{', '.join(unknown)}")
+        session_id = _monitoring_session_id(payload.pop("session_id", "default"))
+        result = get_agent_service().run_skill(
+            "control-stream-archive",
+            session_id=session_id,
+            arguments={"action": "start", **payload},
+        )
+        return jsonify({**result, "session_id": session_id}), _monitoring_http_status(result)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.post("/api/agent/archive/stop")
+def api_agent_archive_stop():
+    try:
+        payload = _monitoring_request_body()
+        allowed = {"session_id", "source_id"}
+        unknown = sorted(set(payload) - allowed)
+        if unknown:
+            raise ValueError(f"请求包含不支持的字段：{', '.join(unknown)}")
+        session_id = _monitoring_session_id(payload.pop("session_id", "default"))
+        result = get_agent_service().run_skill(
+            "control-stream-archive",
+            session_id=session_id,
+            arguments={"action": "stop", **payload},
+        )
+        return jsonify({**result, "session_id": session_id}), _monitoring_http_status(result)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.get("/api/agent/archive/status")
+def api_agent_archive_status():
+    try:
+        session_id = _monitoring_session_id(request.args.get("session_id"))
+        source_id = request.args.get("source_id", "").strip().lower()
+        if not source_id:
+            raise ValueError("source_id 不能为空")
+        result = get_agent_service().run_skill(
+            "control-stream-archive",
+            session_id=session_id,
+            arguments={"action": "query", "source_id": source_id, "limit": 1},
+        )
+        return jsonify({**result, "session_id": session_id}), _monitoring_http_status(result)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.get("/api/agent/archive/segments")
+def api_agent_archive_segments():
+    try:
+        session_id = _monitoring_session_id(request.args.get("session_id"))
+        source_id = request.args.get("source_id", "").strip().lower()
+        limit = int(request.args.get("limit", "100"))
+        if not source_id:
+            raise ValueError("source_id 不能为空")
+        if not 1 <= limit <= 1000:
+            raise ValueError("limit 必须在 1 到 1000 之间")
+        result = get_agent_service().run_skill(
+            "control-stream-archive",
+            session_id=session_id,
+            arguments={"action": "query", "source_id": source_id, "limit": limit},
+        )
+        return jsonify({**result, "session_id": session_id}), _monitoring_http_status(result)
     except (TypeError, ValueError) as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:

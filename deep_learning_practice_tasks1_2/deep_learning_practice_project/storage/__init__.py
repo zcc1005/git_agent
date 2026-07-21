@@ -7,6 +7,8 @@ from .sqlite_store import (
     MonitoringRunRecord,
     MonitoringTaskRecord,
     SQLiteHistoryStore,
+    StreamArchiveSegmentRecord,
+    StreamArchiveStateRecord,
     StreamSegmentRecord,
 )
 
@@ -17,5 +19,7 @@ __all__ = [
     "MonitoringRunRecord",
     "MonitoringTaskRecord",
     "SQLiteHistoryStore",
+    "StreamArchiveSegmentRecord",
+    "StreamArchiveStateRecord",
     "StreamSegmentRecord",
 ]

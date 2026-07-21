@@ -11,6 +11,7 @@ from .service import AgentService
 from .planners import SkillPlan, SkillPlanner, SkillPlanningError, SkillPlanStep
 from .skills import RuntimeSkill, SkillRegistry, SkillResult, SkillSpec
 from .tools import AgentTools, ImageDetectionOutcome, VideoDetectionOutcome
+from .archive import ArchiveRangeResult, HistoricalStreamArchiveManager
 from .streaming import (
     RtspStreamCapture,
     RtspStreamProbe,
@@ -38,6 +39,8 @@ __all__ = [
     "RuleBasedIntentRecognizer",
     "ImageDetectionOutcome",
     "VideoDetectionOutcome",
+    "ArchiveRangeResult",
+    "HistoricalStreamArchiveManager",
     "existing_web_alarm_control",
     "RuntimeSkill",
     "SkillRegistry",

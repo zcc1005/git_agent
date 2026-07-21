@@ -208,3 +208,59 @@ GET /api/agent/monitoring/events?session_id=operator-session&task_id=monitor-012
 - 完成、失败或人工取消原因。
 
 浏览器关闭或普通聊天请求结束不会停止后台任务。当前方案用于本地单进程验证；部署多进程 Flask 或需要跨机器恢复时，再把相同 SQLite/Skill 契约迁移到 RQ、Celery 或独立 worker，并增加租约与心跳。APScheduler 更适合后续周期性调度，不用于替代当前片段执行队列。
+
+## 历史录像归档与按时段检测
+
+第九阶段把“持续保存录像”和“按需运行检测”拆成两条链路。归档线程只调用现有 RTSP 采集器，不运行 YOLO；用户请求已经过去的绝对时间区间时，才检索录像并复用 `detect-video`。
+
+启动每分钟分片、保留最近 24 小时：
+
+```python
+service.run_skill(
+    "control-stream-archive",
+    arguments={
+        "action": "start",
+        "source_id": "main-monitor",
+        "segment_seconds": 60,
+        "retention_hours": 24
+    },
+)
+```
+
+查看或停止时分别使用规范动作 `query`、`stop`。应用重启后，残留的活动归档会标记为 `failed`，不会自动连接摄像头。
+
+录像真相索引保存在：
+
+- `stream_archive_state`：每个来源的归档状态、分片时长、保留期、最后片段和错误。
+- `stream_archive_segments`：录像路径、真实起止时间、时长、状态和安全采集元数据。
+- `outputs/rtsp_archive/<source_id>/manifest.json`：SQLite 索引的原子 JSON 镜像，不保存 RTSP URL 或凭据。
+
+每轮采集结束后会清理 `ended_at` 超过保留期的文件。删除操作只允许命中配置的录像输出根目录，越界路径会保留并报告，防止错误索引删除任意文件。
+
+检测历史时段：
+
+```python
+service.run_skill(
+    "detect-archived-video",
+    session_id="operator",
+    arguments={
+        "source_id": "main-monitor",
+        "start_time": "2026-07-21T08:00:00+08:00",
+        "end_time": "2026-07-21T09:00:00+08:00",
+        "parameters": {"sample_fps": 4.0}
+    },
+)
+```
+
+执行层先验证所有重叠 `ready` 片段的时间并集和文件存在性，再裁剪首尾片段并逐段调用现有检测、风险、报警和历史入库链路。若覆盖不完整则返回 `archive_coverage_gap` 和精确 `gaps`；索引存在但文件缺失则返回 `archive_segment_missing`。两种情况都不会使用当前 RTSP 画面冒充历史录像。
+
+Web 控制接口：
+
+```text
+POST /api/agent/archive/start
+POST /api/agent/archive/stop
+GET  /api/agent/archive/status?source_id=main-monitor
+GET  /api/agent/archive/segments?source_id=main-monitor&limit=100
+```
+
+大模型规划约束为：过去的固定监控绝对时间区间使用 `detect-archived-video`；当前画面使用 `detect-video-source`；从现在开始持续检测使用 `start-monitoring-task`。SQLite 中没有的历史录像不能事后补回，必须先启动归档并持续运行。

@@ -30,6 +30,7 @@ HELP_TEXT = (
     "也可从固定监控源采集一个定长本地视频片段。"
     "还可对已注册 RTSP 监控执行单次采集、异物检测、风险研判和报警闭环入库。"
     "还可创建最长 24 小时的非全天候监控任务，并查询状态或人工停止。"
+    "还可持续归档 RTSP 录像、保留最近 24 小时，并按绝对时间范围检测历史录像。"
 )
 MISSING_MEDIA_REPLY = "还没有看到图片/视频，发过来立刻帮你分析。"
 ATTACHMENT_LABELS = {"image": "图片", "video": "视频"}
@@ -43,6 +44,7 @@ PLANNING_HINT = re.compile(
     r"第?\s*\d+(?:\.\d+)?\s*分钟|从\s*\d{1,2}[：:]\d{2}\s*检测到|"
     r"风险研判|人工复核|误报|假阳性|闭环|处理完成|"
     r"开始监控|启动监控|预约监控|停止监控|监控任务|巡检任务|"
+    r"历史录像|录像归档|开始录像|停止录像|保留\s*\d+\s*小时|"
     r"并且|然后|同时|随后|再生成|以及)",
     re.I,
 )
@@ -358,6 +360,7 @@ class AgentService:
                 "query-history",
                 "generate-risk-report",
                 "start-monitoring-task",
+                "detect-archived-video",
             }:
                 arguments.pop("date", None)
                 if step.skill_name == "start-monitoring-task":
@@ -426,6 +429,14 @@ class AgentService:
             r"(?:(?:停止|终止|结束|取消|关闭).{0,16}(?:监控|巡检|任务)|"
             r"(?:监控|巡检|任务).{0,16}(?:停止|终止|结束|取消|关闭)|不再监控|别监控了)"
         )
+        start_archive = re.compile(
+            r"(?:(?:开始|启动|开启).{0,12}(?:录像|录制|归档)|"
+            r"(?:持续|全天).{0,12}(?:录像|录制|保存录像))"
+        )
+        stop_archive = re.compile(
+            r"(?:(?:停止|终止|结束|取消|关闭).{0,12}(?:录像|录制|归档)|"
+            r"(?:录像|录制|归档).{0,12}(?:停止|终止|结束|取消|关闭))"
+        )
         review_patterns = {
             "confirm": re.compile(r"(?:确认|认定).*(?:检测|结果|异物)"),
             "reject": re.compile(r"(?:驳回|误报|假阳性|不是异物)"),
@@ -450,6 +461,12 @@ class AgentService:
             if step.skill_name == "control-monitoring-task" and action == "stop":
                 if not stop_monitoring.search(message):
                     raise SkillPlanningError("停止监控任务必须来自用户明确的停止指令")
+            if step.skill_name == "control-stream-archive" and action == "start":
+                if not start_archive.search(message):
+                    raise SkillPlanningError("启动录像归档必须来自用户明确的开始录像指令")
+            if step.skill_name == "control-stream-archive" and action == "stop":
+                if not stop_archive.search(message):
+                    raise SkillPlanningError("停止录像归档必须来自用户明确的停止录像指令")
 
     def chat(
         self,

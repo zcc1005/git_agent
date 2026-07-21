@@ -195,6 +195,8 @@ class AgentSkillTests(unittest.TestCase):
                 "detect-video-source",
                 "start-monitoring-task",
                 "control-monitoring-task",
+                "control-stream-archive",
+                "detect-archived-video",
             },
         )
         alarm_spec = next(item for item in catalog if item["name"] == "control-alarm")
