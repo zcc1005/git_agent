@@ -12,7 +12,7 @@ from .schemas import ALL_SKILL_SCHEMAS
 
 
 RISK_LEVELS = {"none", "low", "medium", "high"}
-SOURCE_TYPES = {"image", "video"}
+SOURCE_TYPES = {"image", "video", "realtime"}
 REVIEW_STATUSES = {"unreviewed", "confirmed", "rejected", "closed"}
 ALARM_ACTIONS = {"query", "confirm", "cancel"}
 ALARM_READ_ACTION_ALIASES = {
@@ -143,7 +143,15 @@ def _validate_alarm(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     action = ALARM_READ_ACTION_ALIASES.get(action, action)
     if action not in ALARM_ACTIONS:
         raise ValueError("action 只能是 query、confirm 或 cancel")
+    scope = str(values.get("scope") or "single").strip().lower()
+    if scope not in {"single", "realtime_task"}:
+        raise ValueError("scope 只能是 single 或 realtime_task")
+    if scope == "realtime_task" and action == "query":
+        raise ValueError("realtime_task scope 只用于明确的 confirm 或 cancel 写操作")
+    if scope == "realtime_task" and values.get("alarm_id"):
+        raise ValueError("批量闭环不能同时指定 alarm_id")
     values["action"] = action
+    values["scope"] = scope
     return values
 
 
@@ -207,6 +215,26 @@ def _validate_review(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     if action not in {"confirm", "reject", "close", "reopen"}:
         raise ValueError("action 只能是 confirm、reject、close 或 reopen")
     values["action"] = action
+    return values
+
+
+def _validate_detection_explanation(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    values = dict(arguments)
+    question_type = str(values.get("question_type") or "general").strip().lower()
+    allowed = {
+        "risk_reason",
+        "action_advice",
+        "similar_history",
+        "target_position",
+        "general",
+    }
+    if question_type not in allowed:
+        raise ValueError("question_type 必须是风险原因、处置建议、同类历史、目标位置或 general")
+    values["question_type"] = question_type
+    history_limit = int(values.get("history_limit", 10))
+    if not 1 <= history_limit <= 50:
+        raise ValueError("history_limit 必须位于 1 到 50 之间")
+    values["history_limit"] = history_limit
     return values
 
 
@@ -346,6 +374,59 @@ def _validate_control_monitoring_task(arguments: Mapping[str, Any]) -> Dict[str,
     return values
 
 
+def _validate_start_realtime_inspection(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    values = _validate_detect_video_source(arguments)
+    values.pop("duration_seconds", None)
+    end_time = values.get("end_time")
+    duration = values.get("run_duration_seconds")
+    if bool(end_time) == bool(duration is not None):
+        raise ValueError("end_time 与 run_duration_seconds 必须且只能提供一个")
+    if values.get("start_time"):
+        values["start_time"] = _parse_aware_datetime(values["start_time"], "start_time").isoformat(timespec="seconds")
+    if end_time:
+        end = _parse_aware_datetime(end_time, "end_time")
+        if values.get("start_time") and end <= _parse_aware_datetime(values["start_time"], "start_time"):
+            raise ValueError("end_time 必须晚于 start_time")
+        values["end_time"] = end.isoformat(timespec="seconds")
+    else:
+        seconds = float(duration)
+        if not 1 <= seconds <= 86400: raise ValueError("run_duration_seconds 必须在 1 到 86400 之间")
+        values["run_duration_seconds"] = seconds
+    parameters = values.get("parameters") or {}
+    if "sample_fps" in parameters:
+        raise ValueError("实时巡检的 sample_fps 必须使用顶层字段，不能放入 parameters")
+    values["sample_fps"] = float(values.get("sample_fps", 2.0))
+    if not 0.2 <= values["sample_fps"] <= 10: raise ValueError("sample_fps 必须在 0.2 到 10 之间")
+    values["reconnect_interval_seconds"] = float(values.get("reconnect_interval_seconds", 3.0))
+    values["max_consecutive_failures"] = int(values.get("max_consecutive_failures", 3))
+    values["min_event_hits"] = int(values.get("min_event_hits", 2))
+    values["event_silence_seconds"] = float(values.get("event_silence_seconds", 1.0))
+    return values
+
+
+def _validate_control_realtime_inspection(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    values = dict(arguments)
+    aliases = {"view": "query", "show": "query", "status": "query", "get": "query", "cancel": "stop"}
+    action = aliases.get(str(values.get("action") or "query").strip().lower(), str(values.get("action") or "query").strip().lower())
+    if action not in {"query", "stop"}: raise ValueError("action 只能是 query 或 stop")
+    task_id = str(values.get("task_id") or "").strip().lower()
+    if task_id and not re.fullmatch(r"realtime-[a-f0-9]{12}", task_id): raise ValueError("task_id 格式无效")
+    source_id = str(values.get("source_id") or "").strip().lower()
+    if source_id and not VIDEO_SOURCE_ID_PATTERN.fullmatch(source_id): raise ValueError("source_id 格式无效")
+    for name in ("event_id", "after_event_id"):
+        value = str(values.get(name) or "").strip().lower()
+        if value and not re.fullmatch(r"realtime-[a-f0-9]{12}-event-\d{4,}", value):
+            raise ValueError(f"{name} 格式无效")
+        if value: values[name] = value
+    values["latest"] = bool(values.get("latest", False))
+    values["active_only"] = bool(values.get("active_only", False))
+    values["events_only"] = bool(values.get("events_only", False))
+    values.update(action=action, limit=int(values.get("limit", 10)))
+    if task_id: values["task_id"] = task_id
+    if source_id: values["source_id"] = source_id
+    return values
+
+
 def _validate_control_stream_archive(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     values = _validate_probe_video_source(arguments)
     aliases = {
@@ -448,10 +529,11 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
             SkillSpec(
                 "control-alarm",
                 (
-                    "查看、确认或取消当前报警，并记录操作审计。查看、查询、显示或获取"
-                    "报警状态时 action 必须为 query；confirm/cancel 仅用于用户明确要求的写操作。"
+                    "查看、确认或取消当前报警，并记录操作审计；也可在用户明确要求时按"
+                    "实时巡检 task_id 批量闭环本轮报警。查询必须使用 query；"
+                    "confirm/cancel 仅用于明确写操作。"
                 ),
-                optional_inputs=("action", "alarm_id", "line_id", "session_only", "note"),
+                optional_inputs=("action", "alarm_id", "scope", "task_id", "line_id", "session_only", "note"),
                 safety="controlled-write",
                 input_schema=ALL_SKILL_SCHEMAS["control-alarm"],
             ),
@@ -495,6 +577,26 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
             ),
             tools.review_detection,
             _validate_review,
+        )
+    )
+    registry.register(
+        RuntimeSkill(
+            SkillSpec(
+                "explain-detection-result",
+                (
+                    "基于当前会话指定或最近一次 detection_id 的数据库事实，解释风险原因、"
+                    "处置建议、同类历史或目标位置。只读；风险等级和报警状态仍以规则引擎与数据库为准。"
+                ),
+                optional_inputs=(
+                    "detection_id",
+                    "question",
+                    "question_type",
+                    "history_limit",
+                ),
+                input_schema=ALL_SKILL_SCHEMAS["explain-detection-result"],
+            ),
+            tools.explain_detection_result,
+            _validate_detection_explanation,
         )
     )
 
@@ -616,6 +718,35 @@ def create_builtin_skill_registry(tools: AgentTools) -> SkillRegistry:
             ),
             tools.control_monitoring_task,
             _validate_control_monitoring_task,
+        )
+    )
+    registry.register(
+        RuntimeSkill(
+            SkillSpec(
+                "start-realtime-inspection",
+                "以单一持续 RTSP 连接执行有界实时巡检、抽帧单帧推理、事件聚合、确定性风险研判、报警和历史入库；不生成正常画面 MP4。",
+                required_inputs=("source_id",),
+                optional_inputs=("start_time", "end_time", "run_duration_seconds", "sample_fps", "zone_id", "parameters",
+                                 "reconnect_interval_seconds", "max_consecutive_failures", "min_event_hits", "event_silence_seconds"),
+                safety="controlled-write",
+                input_schema=ALL_SKILL_SCHEMAS["start-realtime-inspection"],
+            ),
+            tools.start_realtime_inspection,
+            _validate_start_realtime_inspection,
+        )
+    )
+    registry.register(
+        RuntimeSkill(
+            SkillSpec(
+                "control-realtime-inspection",
+                "查询或停止当前会话的持续实时巡检；查看、显示、状态统一使用 query，只有明确停止请求才使用 stop。",
+                optional_inputs=("action", "task_id", "source_id", "event_id", "after_event_id",
+                                 "latest", "active_only", "events_only", "limit"),
+                safety="controlled-write",
+                input_schema=ALL_SKILL_SCHEMAS["control-realtime-inspection"],
+            ),
+            tools.control_realtime_inspection,
+            _validate_control_realtime_inspection,
         )
     )
     registry.register(

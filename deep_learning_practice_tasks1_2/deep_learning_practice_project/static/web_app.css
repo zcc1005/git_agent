@@ -530,32 +530,6 @@ body.agent-drawer-open .agent-drawer {
   line-height: 1.55;
 }
 
-.phase-track {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 3px;
-}
-
-.phase-track span {
-  padding: 6px 3px;
-  border-radius: 4px;
-  color: #8a999d;
-  background: #e9eff0;
-  font-size: 11px;
-  font-weight: 800;
-  text-align: center;
-}
-
-.phase-track span.done {
-  color: #267565;
-  background: #dff1ec;
-}
-
-.phase-track span.active {
-  color: #fff;
-  background: var(--accent);
-}
-
 .context-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

@@ -273,7 +273,31 @@ class AgentServiceTests(unittest.TestCase):
         self.service.chat("你能做什么", session_id="s1")
         history = self.service.history("s1")
         self.assertEqual([item["role"] for item in history], ["user", "assistant"])
-        self.assertEqual(history[-1]["intent"], "help")
+        self.assertEqual(history[-1]["intent"], "project_knowledge")
+        self.assertEqual(history[-1]["metadata"]["mode"], "knowledge")
+
+    def test_agent_output_hides_timezone_suffix_and_uses_local_wall_time(self) -> None:
+        formatted = self.service._format_output_times(
+            {
+                "local": "2026-07-22T16:38:47+08:00",
+                "utc": "2026-07-22T08:38:47+00:00",
+                "reply": "开始时间：2026-07-22T16:38:47+08:00",
+            }
+        )
+
+        self.assertEqual(formatted["local"], "2026-07-22 16:38:47")
+        self.assertEqual(formatted["utc"], "2026-07-22 16:38:47")
+        self.assertEqual(formatted["reply"], "开始时间：2026-07-22 16:38:47")
+        self.assertNotIn("+08:00", str(formatted))
+
+    def test_history_also_formats_preexisting_timestamp_messages(self) -> None:
+        self.store.record_message(
+            "time-history", "assistant", "结束时间：2026-07-22T16:40:46+08:00"
+        )
+
+        history = self.service.history("time-history")
+
+        self.assertEqual(history[0]["content"], "结束时间：2026-07-22 16:40:46")
 
 
 if __name__ == "__main__":

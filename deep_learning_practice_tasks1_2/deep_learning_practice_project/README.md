@@ -161,6 +161,20 @@ python main_pipeline.py --command go --source data/yolo_yiwu/images/test
 python web_app.py
 ```
 
+## 持续实时巡检
+
+`start-realtime-inspection` 与旧的 `start-monitoring-task` 相互独立：前者在任务期内保持一个 RTSP 连接并按 `sample_fps` 抽帧推理；后者仍按“采集定长 MP4 后检测、等待、重新连接”的周期方式运行。
+
+持续实时巡检默认不缓存完整视频，不保存正常帧，也不生成每轮 MP4。系统只保存确认异物聚合事件的一张代表帧和事件 JSON，路径为 `outputs/realtime_inspections/<source_id>/<task_id>/events/`。需要持续保存完整历史录像时使用 `control-stream-archive`；需要检测过去时间范围时使用 `detect-archived-video`。
+
+常用口令：
+
+- `从现在开始持续实时巡检主监控2分钟，每秒检测2帧`
+- `查看主监控实时巡检状态`
+- `停止主监控实时巡检`
+
+实时巡检必须提供运行时长或结束时间，单任务最长 24 小时。服务重启后，未完成任务会标记为 `interrupted`，不会静默恢复。
+
 浏览器访问 `http://127.0.0.1:5000`。
 
 智能助手支持：

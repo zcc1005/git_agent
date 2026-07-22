@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 from zoneinfo import ZoneInfo
 
-from project_config import OUTPUTS_DIR
+from project_config import OUTPUTS_DIR, PROJECT_ROOT
 from storage import SQLiteHistoryStore
 
+from .knowledge_base import (
+    DETAILED_SOURCE_PATTERN,
+    KnowledgeAnswerer,
+    ProjectKnowledgeBase,
+)
 from .intents import Intent
 from .intents import RuleBasedIntentRecognizer
 from .planners import SkillPlan, SkillPlanner, SkillPlanningError, SkillPlanStep
@@ -19,7 +25,7 @@ from .recognizers import (
 from .router import ToolRouter
 from .skills import SkillRegistry, create_builtin_skill_registry
 from .temporal import DEFAULT_TIMEZONE, resolve_temporal_expression
-from .tools import AgentTools
+from .tools import AgentTools, DetectionExplainer
 
 
 HELP_TEXT = (
@@ -45,8 +51,83 @@ PLANNING_HINT = re.compile(
     r"风险研判|人工复核|误报|假阳性|闭环|处理完成|"
     r"开始监控|启动监控|预约监控|停止监控|监控任务|巡检任务|"
     r"历史录像|录像归档|开始录像|停止录像|保留\s*\d+\s*小时|"
+    r"为什么.*风险|处置建议|同类历史|解释目标位置|"
     r"并且|然后|同时|随后|再生成|以及)",
     re.I,
+)
+
+EXPLANATION_QUESTION_PATTERNS = (
+    ("risk_reason", re.compile(r"为什么.*(?:高|中|低|无)?风险|风险.*(?:原因|依据|为什么)")),
+    ("action_advice", re.compile(r"(?:有什么|给出|查看|解释)?.{0,6}(?:处置|处理|应对)建议|应该怎么处理")),
+    ("similar_history", re.compile(r"(?:查看|查询|找|有没有)?.{0,6}同类历史|类似.*历史")),
+    ("target_position", re.compile(r"解释.*(?:目标)?位置|目标.*(?:在哪|位置|坐标)")),
+)
+REALTIME_TERMS = r"(?:实时巡检|持续巡检|持续实时巡检|持续连接检测|实施巡检|实时监测|持续监测)"
+REALTIME_QUERY_PATTERN = re.compile(
+    rf"(?:(?:查看|查询|显示|获取|看看).{{0,24}}{REALTIME_TERMS}.{{0,8}}(?:状态|情况|进度)?|"
+    rf"{REALTIME_TERMS}.{{0,16}}(?:状态|情况|进度))"
+)
+REALTIME_STOP_PATTERN = re.compile(
+    rf"(?:(?:停止|终止|结束|取消|关闭|暂停|停掉).{{0,24}}{REALTIME_TERMS}|"
+    rf"{REALTIME_TERMS}.{{0,24}}(?:停止|终止|结束|取消|关闭|暂停|停掉))"
+)
+REALTIME_START_PATTERN = re.compile(
+    rf"(?:开始|启动|开启|安排|预约|从现在开始|从.+开始).{{0,24}}{REALTIME_TERMS}"
+)
+REALTIME_REPORT_PATTERN = re.compile(
+    rf"(?:(?:输出|生成|查看|给我|调出).{{0,24}}(?:上一轮|上一次|最近一次|刚才)?"
+    rf".{{0,12}}{REALTIME_TERMS}.{{0,12}}(?:报警|预警|风险)?报告|"
+    rf"(?:上一轮|上一次|最近一次|刚才)?.{{0,12}}{REALTIME_TERMS}"
+    rf".{{0,12}}(?:报警|预警|风险)报告)"
+)
+REALTIME_ALARM_CONFIRM_BATCH_PATTERN = re.compile(
+    r"(?<!已)(?:确认|保留).{0,12}(?:本轮|全部|所有|实时巡检).{0,8}(?:报警|告警)"
+)
+REALTIME_ALARM_CANCEL_BATCH_PATTERN = re.compile(
+    r"(?<!已)(?:取消|撤销|关闭).{0,12}(?:本轮|全部|所有|实时巡检).{0,8}(?:报警|告警)"
+)
+REALTIME_EVENT_LATEST_PATTERN = re.compile(
+    r"(?:查看|查询|显示|给我).{0,18}(?:最近一次|最新|刚才).{0,10}(?:异物|报警|预警).{0,6}(?:报告|详情)?"
+)
+REALTIME_EVENT_ALL_PATTERN = re.compile(
+    rf"(?:查看|查询|显示).{{0,12}}(?:本次|当前).{{0,8}}{REALTIME_TERMS}.{{0,12}}(?:所有|全部).{{0,6}}(?:异物|事件|报警)"
+)
+REALTIME_EVENT_ACTIVE_PATTERN = re.compile(
+    r"(?:查看|查询|显示).{0,12}(?:当前|仍在|正在).{0,8}(?:持续|活动|未结束).{0,6}(?:报警|异物|事件)"
+)
+REALTIME_EVENT_DETAIL_PATTERN = re.compile(
+    r"(?:查看|查询|显示|解释).{0,8}(realtime-[a-f0-9]{12}-event-\d{4,}).{0,8}(?:详细|详情|报告)",
+    re.I,
+)
+KNOWLEDGE_HOWTO_PATTERN = re.compile(r"(?:如何|怎么|怎样|该怎么).{0,40}(?:使用|配置|接入|启动|查询|查看|停止|检测|保存|运行)")
+KNOWLEDGE_DOMAIN_PATTERN = re.compile(
+    r"(?:这个系统|本系统|项目|功能|配置|参数|文件|目录|路径|源码|代码|函数|接口|数据库|Skill|RTSP|YOLO|MediaMTX|FFmpeg|"
+    r"sample_fps|known_conf|conf|unknown|NMS|报警(?:规则|报告|记录|信息|数据|机制)|"
+    r"告警(?:规则|报告|记录|信息|数据|机制)|历史记录|检测历史|报警历史|历史报警|历史录像|代表帧|"
+    r"实时检测|周期巡检|实时巡检|持续巡检|录像归档|Web服务|connecting|reconnecting|gpu_busy)",
+    re.I,
+)
+KNOWLEDGE_QUESTION_PATTERN = re.compile(
+    r"(?:是什么|有什么|能做什么|支持什么|怎么用|如何|怎么|怎样|为什么|为何|区别|不同|"
+    r"什么意思|含义|作用|用途|在哪里|在哪儿|保存在哪|放在哪|放哪儿|分别|哪些|"
+    r"都是?啥|是啥|干嘛的|干什么用|咋用|咋配置|咋接入|咋启动|咋查询|咋停止|"
+    r"是否缓存|会不会|吗[？?]?$)",
+    re.I,
+)
+KNOWLEDGE_CONTEXT_PATTERN = re.compile(
+    r"^(?:它|这个|这个功能|这个模式|上述功能|该功能|那它|那这个).*(?:吗|呢|如何|怎么|为什么|哪里|保存|缓存|区别)",
+    re.I,
+)
+DYNAMIC_STATE_PATTERN = re.compile(
+    r"(?:(?:当前|现在|目前|今天|上一轮|上一次|最近一次).{0,20}(?:在线|连接状态|任务状态|运行状态|"
+    r"正在运行|报警数量|几次|多少|检测结果)|(?:主监控|监控源).{0,12}(?:在线吗|是否在线|连接正常吗))"
+)
+STATIC_STATUS_EXPLANATION_PATTERN = re.compile(
+    r"(?:为什么|为何|什么意思|含义).{0,24}(?:connecting|reconnecting|gpu_busy|interrupted|failed)",
+    re.I,
+)
+DISPLAY_ISO_TIME_PATTERN = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?"
 )
 
 
@@ -66,6 +147,8 @@ class AgentService:
         skill_planner: Optional[SkillPlanner] = None,
         skill_planner_mode: str = "hybrid",
         timezone_name: str = DEFAULT_TIMEZONE,
+        knowledge_base: Optional[ProjectKnowledgeBase] = None,
+        knowledge_answerer: Optional[KnowledgeAnswerer] = None,
     ) -> None:
         if recognizer is not None and model_recognizer is not None:
             raise ValueError("recognizer 与 model_recognizer 不能同时提供")
@@ -78,6 +161,8 @@ class AgentService:
         self.skill_registry = skill_registry or create_builtin_skill_registry(self.tools)
         self.skill_planner = skill_planner
         self.timezone_name = timezone_name
+        self.knowledge_base = knowledge_base or ProjectKnowledgeBase(PROJECT_ROOT)
+        self.knowledge_answerer = knowledge_answerer
         self.skill_planner_mode = skill_planner_mode.strip().lower()
         if self.skill_planner_mode not in {"hybrid", "always"}:
             raise ValueError("skill_planner_mode 只能是 hybrid 或 always")
@@ -143,11 +228,328 @@ class AgentService:
         arguments: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Stable deterministic entry point for a future LLM planner or Web API."""
-        return self.skill_registry.invoke(
+        result = self.skill_registry.invoke(
             skill_name,
             session_id=session_id,
             arguments=arguments or {},
         ).to_dict()
+        self._decorate_detection_data(result.get("data"), session_id=session_id)
+        return self._format_output_times(result)
+
+    def _format_output_times(self, value: Any) -> Any:
+        """Format agent-facing timestamps in local time without ISO timezone suffixes."""
+        if isinstance(value, dict):
+            return {name: self._format_output_times(item) for name, item in value.items()}
+        if isinstance(value, list):
+            return [self._format_output_times(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._format_output_times(item) for item in value)
+        if not isinstance(value, str):
+            return value
+
+        timezone_value = ZoneInfo(self.timezone_name)
+
+        def replace(match: re.Match[str]) -> str:
+            raw = match.group(0)
+            try:
+                parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone(timezone_value)
+                return parsed.strftime("%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                return raw.replace("T", " ")
+
+        return DISPLAY_ISO_TIME_PATTERN.sub(replace, value)
+
+    def _present_skill_reply(self, response: Dict[str, Any]) -> None:
+        """Keep deterministic Skill data intact while making its chat text operator-friendly."""
+        if response.get("mode") == "knowledge":
+            return
+        raw = str(response.get("reply") or "").strip()
+        data = response.get("data") if isinstance(response.get("data"), Mapping) else {}
+        if raw.startswith(("{", "[")):
+            if data.get("online") is not None:
+                raw = "监控源当前在线。" if data.get("online") else "监控源当前不在线。"
+            elif data.get("count") is not None:
+                raw = f"查询完成，共找到 {data.get('count')} 条记录。"
+            elif data.get("found") is False:
+                raw = "没有找到符合条件的记录。"
+            else:
+                raw = "查询已完成，结果已整理展示。"
+        response["reply"] = self.knowledge_base.localize_user_text(raw)
+
+    @staticmethod
+    def _explanation_question_type(message: str) -> str:
+        for question_type, pattern in EXPLANATION_QUESTION_PATTERNS:
+            if pattern.search(message):
+                return question_type
+        return ""
+
+    @staticmethod
+    def _realtime_control_action(message: str) -> str:
+        if KNOWLEDGE_HOWTO_PATTERN.search(message):
+            return ""
+        if REALTIME_STOP_PATTERN.search(message):
+            return "stop"
+        if REALTIME_QUERY_PATTERN.search(message) or REALTIME_REPORT_PATTERN.search(message):
+            return "query"
+        return ""
+
+    @staticmethod
+    def _realtime_alarm_batch_action(message: str) -> str:
+        if REALTIME_ALARM_CONFIRM_BATCH_PATTERN.search(message):
+            return "confirm"
+        if REALTIME_ALARM_CANCEL_BATCH_PATTERN.search(message):
+            return "cancel"
+        return ""
+
+    @staticmethod
+    def _realtime_event_query_arguments(message: str) -> Dict[str, Any]:
+        detail = REALTIME_EVENT_DETAIL_PATTERN.search(message)
+        if detail:
+            return {"action": "query", "event_id": detail.group(1).lower(), "events_only": True}
+        if REALTIME_EVENT_ACTIVE_PATTERN.search(message):
+            return {"action": "query", "active_only": True, "events_only": True, "limit": 100}
+        if REALTIME_EVENT_ALL_PATTERN.search(message):
+            return {"action": "query", "events_only": True, "limit": 100}
+        if REALTIME_EVENT_LATEST_PATTERN.search(message):
+            return {"action": "query", "latest": True, "events_only": True, "limit": 1}
+        return {}
+
+    @staticmethod
+    def _should_use_knowledge(
+        message: str,
+        match: Any,
+        *,
+        has_knowledge_context: bool,
+    ) -> bool:
+        if ProjectKnowledgeBase.answer_mode(message) == "developer":
+            return True
+        if STATIC_STATUS_EXPLANATION_PATTERN.search(message):
+            return True
+        if DYNAMIC_STATE_PATTERN.search(message):
+            return False
+        if has_knowledge_context and KNOWLEDGE_CONTEXT_PATTERN.search(message.strip()):
+            return True
+        if KNOWLEDGE_HOWTO_PATTERN.search(message) and KNOWLEDGE_DOMAIN_PATTERN.search(message):
+            return True
+        if match.intent == Intent.HELP:
+            return True
+        if match.intent != Intent.UNKNOWN:
+            return False
+        return bool(
+            KNOWLEDGE_DOMAIN_PATTERN.search(message)
+            and KNOWLEDGE_QUESTION_PATTERN.search(message)
+        )
+
+    def _latest_knowledge_query(self, session_id: str) -> str:
+        for item in reversed(self.store.list_messages(session_id, limit=30)):
+            if item.get("role") != "assistant":
+                continue
+            metadata = item.get("metadata")
+            if not isinstance(metadata, Mapping) or metadata.get("mode") != "knowledge":
+                continue
+            return str(metadata.get("knowledge_query") or "").strip()
+        return ""
+
+    def _classify_ambiguous_request(
+        self,
+        message: str,
+        *,
+        history: list[Dict[str, Any]],
+    ) -> Dict[str, str]:
+        """Use the LLM only as a non-authoritative router for ambiguous text."""
+        classifier = getattr(self.knowledge_answerer, "classify_request", None)
+        if not callable(classifier):
+            return {}
+        try:
+            raw = classifier(message, history[-8:])
+        except Exception:
+            return {}
+        if not isinstance(raw, Mapping):
+            return {}
+        mode = str(raw.get("mode") or "").strip().lower()
+        aliases = {
+            "command": "execute",
+            "action": "execute",
+            "status": "dynamic",
+            "history": "dynamic",
+            "question": "knowledge",
+            "clarification": "clarify",
+        }
+        mode = aliases.get(mode, mode)
+        if mode not in {"execute", "dynamic", "knowledge", "clarify"}:
+            return {}
+        result = {"mode": mode}
+        clarification = str(raw.get("clarification") or "").strip()
+        if clarification:
+            result["clarification"] = clarification[:300]
+        return result
+
+    @staticmethod
+    def _knowledge_answer_is_safe(answer: str, evidence: list[Dict[str, Any]]) -> bool:
+        text = answer.strip()
+        if not text or len(text) > 2000:
+            return False
+        evidence_text = "\n".join(
+            f"{item.get('source', '')}\n{item.get('excerpt', '')}" for item in evidence
+        ).replace("\\", "/").lower()
+        claimed_paths = re.findall(
+            r"[A-Za-z0-9_./\\-]+\.(?:md|py|json|sqlite3|pt|txt|mp4)",
+            text,
+            re.I,
+        )
+        if any(path.replace("\\", "/").lower() not in evidence_text for path in claimed_paths):
+            return False
+        if re.search(
+            r"(?:当前|现在|目前).{0,12}(?:在线|正在运行|共有\s*\d+|报警\s*\d+|任务\s*\d+)",
+            text,
+        ):
+            return False
+        return True
+
+    def _answer_project_knowledge(
+        self,
+        message: str,
+        *,
+        previous_query: str,
+        history: list[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        contextual = bool(previous_query and KNOWLEDGE_CONTEXT_PATTERN.search(message.strip()))
+        retrieval_query = f"{previous_query} {message}" if contextual else message
+        answer_mode = self.knowledge_base.answer_mode(message)
+        hits = self.knowledge_base.search(retrieval_query, limit=6)
+        evidence = [item.to_dict() for item in hits]
+        if not hits:
+            return {
+                "ok": True,
+                "mode": "knowledge",
+                "intent": "project_knowledge",
+                "confidence": 0.0,
+                "recognizer_source": "knowledge_retrieval",
+                "tool_name": "project_knowledge",
+                "reply": self.knowledge_base.fallback_answer(
+                    retrieval_query, hits, answer_mode=answer_mode
+                ),
+                "needs_clarification": True,
+                "knowledge_query": retrieval_query,
+                "data": {
+                    "knowledge_sources": [],
+                    "retrieval": [],
+                    "answer_mode": answer_mode,
+                },
+            }
+        answer = ""
+        answer_source = "fallback"
+        if self.knowledge_answerer is not None:
+            try:
+                candidate = str(
+                    self.knowledge_answerer.answer_project_question(
+                        message,
+                        evidence,
+                        history[-8:],
+                    )
+                ).strip()
+                if self._knowledge_answer_is_safe(candidate, evidence):
+                    answer = (
+                        self.knowledge_base.present_user_answer(message, candidate)
+                        if answer_mode == "user"
+                        else candidate
+                    )
+                    answer_source = "llm"
+            except Exception:
+                answer = ""
+        if not answer:
+            answer = self.knowledge_base.fallback_answer(
+                retrieval_query, hits, answer_mode=answer_mode
+            )
+        sources: list[Dict[str, str]] = []
+        seen = set()
+        for hit in hits:
+            if hit.source in seen:
+                continue
+            seen.add(hit.source)
+            sources.append({"source": hit.source, "heading": hit.heading})
+            if len(sources) >= 5:
+                break
+        detailed_sources = bool(
+            answer_mode == "developer" or DETAILED_SOURCE_PATTERN.search(message)
+        )
+        reference_labels: list[str] = []
+        for item in sources:
+            label = self.knowledge_base.source_label(
+                item["source"], detailed=detailed_sources
+            )
+            if label not in reference_labels:
+                reference_labels.append(label)
+        reference_text = "、".join(reference_labels)
+        return {
+            "ok": True,
+            "mode": "knowledge",
+            "intent": "project_knowledge",
+            "confidence": max((item.score for item in hits), default=0.0),
+            "recognizer_source": "knowledge_retrieval",
+            "tool_name": "project_knowledge",
+            "reply": f"{answer}\n\n参考：{reference_text}" if reference_text else answer,
+            "needs_clarification": False,
+            "knowledge_query": retrieval_query,
+            "data": {
+                "knowledge_sources": sources,
+                "retrieval": evidence,
+                "answer_source": answer_source,
+                "answer_mode": answer_mode,
+            },
+        }
+
+    def _decorate_detection_data(
+        self,
+        value: Any,
+        *,
+        session_id: str,
+        inherited_source_name: str = "",
+    ) -> None:
+        if isinstance(value, list):
+            for item in value:
+                self._decorate_detection_data(
+                    item,
+                    session_id=session_id,
+                    inherited_source_name=inherited_source_name,
+                )
+            return
+        if not isinstance(value, dict):
+            return
+        source_name = str(
+            value.get("display_name")
+            or value.get("monitor_source")
+            or inherited_source_name
+            or ""
+        )
+        detection_id = str(value.get("detection_id") or "").strip()
+        is_detection_result = bool(
+            detection_id
+            and (
+                value.get("alarm_report")
+                or value.get("alarm_json")
+                or (value.get("class_counts") is not None and value.get("risk_level"))
+            )
+        )
+        if is_detection_result and not value.get("structured_alert"):
+            presentation = self.tools.detection_presentation(
+                session_id,
+                detection_id,
+                source_name=source_name,
+                representative_frames=value.get("event_frames") or [],
+            )
+            value.update(presentation)
+        for child in list(value.values()):
+            if child is value.get("structured_alert") or child is value.get("authoritative_facts"):
+                continue
+            if isinstance(child, (dict, list)):
+                self._decorate_detection_data(
+                    child,
+                    session_id=session_id,
+                    inherited_source_name=source_name,
+                )
 
     def skill_catalog(self) -> list[Dict[str, Any]]:
         return self.skill_registry.catalog()
@@ -360,10 +762,11 @@ class AgentService:
                 "query-history",
                 "generate-risk-report",
                 "start-monitoring-task",
+                "start-realtime-inspection",
                 "detect-archived-video",
             }:
                 arguments.pop("date", None)
-                if step.skill_name == "start-monitoring-task":
+                if step.skill_name in {"start-monitoring-task", "start-realtime-inspection"}:
                     arguments.pop("run_duration_seconds", None)
                 arguments["start_time"] = temporal_resolution["start_time"]
                 arguments["end_time"] = temporal_resolution["end_time"]
@@ -437,6 +840,8 @@ class AgentService:
             r"(?:(?:停止|终止|结束|取消|关闭).{0,12}(?:录像|录制|归档)|"
             r"(?:录像|录制|归档).{0,12}(?:停止|终止|结束|取消|关闭))"
         )
+        start_realtime = REALTIME_START_PATTERN
+        stop_realtime = REALTIME_STOP_PATTERN
         review_patterns = {
             "confirm": re.compile(r"(?:确认|认定).*(?:检测|结果|异物)"),
             "reject": re.compile(r"(?:驳回|误报|假阳性|不是异物)"),
@@ -461,6 +866,10 @@ class AgentService:
             if step.skill_name == "control-monitoring-task" and action == "stop":
                 if not stop_monitoring.search(message):
                     raise SkillPlanningError("停止监控任务必须来自用户明确的停止指令")
+            if step.skill_name == "start-realtime-inspection" and not start_realtime.search(message):
+                raise SkillPlanningError("启动实时巡检必须来自用户明确的启动指令")
+            if step.skill_name == "control-realtime-inspection" and action == "stop" and not stop_realtime.search(message):
+                raise SkillPlanningError("停止实时巡检必须来自用户明确的停止指令")
             if step.skill_name == "control-stream-archive" and action == "start":
                 if not start_archive.search(message):
                     raise SkillPlanningError("启动录像归档必须来自用户明确的开始录像指令")
@@ -517,8 +926,32 @@ class AgentService:
             "request_context": planning_request_context,
         }
         match = self.recognizer.recognize(message, context=recognition_context)
+        explanation_question_type = self._explanation_question_type(message)
+        realtime_control_action = self._realtime_control_action(message)
+        realtime_alarm_batch_action = self._realtime_alarm_batch_action(message)
+        realtime_event_arguments = self._realtime_event_query_arguments(message)
+        previous_knowledge_query = self._latest_knowledge_query(session_id)
+        use_knowledge = self._should_use_knowledge(
+            message,
+            match,
+            has_knowledge_context=bool(previous_knowledge_query),
+        )
+        llm_route: Dict[str, str] = {}
+        if (
+            not use_knowledge
+            and match.intent == Intent.UNKNOWN
+            and not explanation_question_type
+            and not realtime_control_action
+            and not realtime_alarm_batch_action
+        ):
+            llm_route = self._classify_ambiguous_request(
+                message,
+                history=recognition_context["history"],
+            )
+            if llm_route.get("mode") == "knowledge":
+                use_knowledge = True
 
-        use_skill_planner = self.skill_planner is not None and match.intent != Intent.HELP and (
+        use_skill_planner = self.skill_planner is not None and not use_knowledge and match.intent != Intent.HELP and (
             self.skill_planner_mode == "always"
             or match.intent == Intent.UNKNOWN
             or bool(PLANNING_HINT.search(message))
@@ -530,7 +963,110 @@ class AgentService:
         resolved_context = dict(incoming_context)
         if should_use_stored_attachment and not incoming_attachment:
             resolved_context = {**stored_attachment_context, **incoming_context}
-        if use_skill_planner:
+        if realtime_event_arguments:
+            for name in ("task_id", "source_id"):
+                if resolved_context.get(name):
+                    realtime_event_arguments[name] = resolved_context[name]
+            routed = self.run_skill(
+                "control-realtime-inspection",
+                session_id=session_id,
+                arguments=realtime_event_arguments,
+            )
+            response = {
+                "session_id": session_id,
+                "intent": "query_realtime_events",
+                "confidence": 1.0,
+                "recognizer_source": "deterministic_realtime_event_query",
+                "recognition_metadata": {"arguments": realtime_event_arguments},
+                "tool_name": "control-realtime-inspection",
+                **routed,
+            }
+        elif realtime_control_action:
+            realtime_arguments: Dict[str, Any] = {"action": realtime_control_action}
+            if resolved_context.get("task_id"):
+                realtime_arguments["task_id"] = resolved_context["task_id"]
+            if resolved_context.get("source_id"):
+                realtime_arguments["source_id"] = resolved_context["source_id"]
+            routed = self.run_skill(
+                "control-realtime-inspection",
+                session_id=session_id,
+                arguments=realtime_arguments,
+            )
+            response = {
+                "session_id": session_id,
+                "intent": "control_realtime_inspection",
+                "confidence": 1.0,
+                "recognizer_source": "deterministic_realtime_control",
+                "recognition_metadata": {"action": realtime_control_action},
+                "tool_name": "control-realtime-inspection",
+                **routed,
+            }
+        elif realtime_alarm_batch_action:
+            alarm_arguments: Dict[str, Any] = {
+                "action": realtime_alarm_batch_action,
+                "scope": "realtime_task",
+            }
+            if resolved_context.get("task_id"):
+                alarm_arguments["task_id"] = resolved_context["task_id"]
+            routed = self.run_skill(
+                "control-alarm",
+                session_id=session_id,
+                arguments=alarm_arguments,
+            )
+            response = {
+                "session_id": session_id,
+                "intent": f"{realtime_alarm_batch_action}_realtime_alarms",
+                "confidence": 1.0,
+                "recognizer_source": "deterministic_realtime_alarm_control",
+                "recognition_metadata": {"action": realtime_alarm_batch_action},
+                "tool_name": "control-alarm",
+                **routed,
+            }
+        elif explanation_question_type:
+            explanation_arguments: Dict[str, Any] = {
+                "question": message,
+                "question_type": explanation_question_type,
+            }
+            if resolved_context.get("detection_id"):
+                explanation_arguments["detection_id"] = resolved_context["detection_id"]
+            routed = self.run_skill(
+                "explain-detection-result",
+                session_id=session_id,
+                arguments=explanation_arguments,
+            )
+            response = {
+                "session_id": session_id,
+                "intent": "explain_detection_result",
+                "confidence": 1.0,
+                "recognizer_source": "contextual_followup",
+                "recognition_metadata": {"question_type": explanation_question_type},
+                "tool_name": "explain-detection-result",
+                **routed,
+            }
+        elif use_knowledge:
+            response = {
+                "session_id": session_id,
+                **self._answer_project_knowledge(
+                    message,
+                    previous_query=previous_knowledge_query,
+                    history=recognition_context["history"],
+                ),
+            }
+        elif llm_route.get("mode") == "clarify":
+            response = {
+                "ok": False,
+                "session_id": session_id,
+                "intent": "needs_clarification",
+                "confidence": 1.0,
+                "recognizer_source": "llm_request_classifier",
+                "recognition_metadata": {"classification": llm_route},
+                "tool_name": "",
+                "reply": llm_route.get("clarification")
+                or "请再说明一下，你是想了解项目知识、查询当前数据，还是执行一个操作？",
+                "needs_clarification": True,
+                "data": {},
+            }
+        elif use_skill_planner:
             try:
                 response = self._run_skill_plan(
                     message,
@@ -539,17 +1075,29 @@ class AgentService:
                     planning_context=recognition_context,
                 )
             except SkillPlanningError as exc:
-                response = {
-                    "ok": False,
-                    "session_id": session_id,
-                    "intent": "skill_plan",
-                    "confidence": 0.0,
-                    "recognizer_source": "llm_skill_planner_error",
-                    "recognition_metadata": {"error": str(exc)},
-                    "tool_name": "skill_orchestrator",
-                    "reply": f"大模型任务规划失败：{exc}",
-                    "data": {},
-                }
+                if str(exc) == "模型没有返回可执行的 Skill 步骤":
+                    response = {
+                        "session_id": session_id,
+                        **self._answer_project_knowledge(
+                            message,
+                            previous_query=previous_knowledge_query,
+                            history=recognition_context["history"],
+                        ),
+                    }
+                    response["recognizer_source"] = "knowledge_fallback_after_empty_skill_plan"
+                    response["recognition_metadata"] = {"planner_error": str(exc)}
+                else:
+                    response = {
+                        "ok": False,
+                        "session_id": session_id,
+                        "intent": "skill_plan",
+                        "confidence": 0.0,
+                        "recognizer_source": "llm_skill_planner_error",
+                        "recognition_metadata": {"error": str(exc)},
+                        "tool_name": "skill_orchestrator",
+                        "reply": f"大模型任务规划失败：{exc}",
+                        "data": {},
+                    }
         elif match.intent in {Intent.HELP, Intent.UNKNOWN}:
             reply = HELP_TEXT if match.intent == Intent.HELP else f"我还不能确定你的意图。{HELP_TEXT}"
             response = {
@@ -583,6 +1131,10 @@ class AgentService:
             response["attachment_received"] = True
             response["attachment"] = incoming_attachment
 
+        self._decorate_detection_data(response.get("data"), session_id=session_id)
+        self._present_skill_reply(response)
+        response = self._format_output_times(response)
+
         self.store.record_message(
             session_id,
             "assistant",
@@ -596,12 +1148,14 @@ class AgentService:
                 "recognizer_source": str(response.get("recognizer_source") or match.source),
                 "recognition_metadata": response.get("recognition_metadata")
                 or match.metadata,
+                "mode": str(response.get("mode") or ""),
+                "knowledge_query": str(response.get("knowledge_query") or ""),
             },
         )
         return response
 
     def history(self, session_id: str = "default", limit: int = 50) -> list[Dict[str, Any]]:
-        return self.store.list_messages(session_id, limit=limit)
+        return self._format_output_times(self.store.list_messages(session_id, limit=limit))
 
 
 def create_default_service(
@@ -611,12 +1165,19 @@ def create_default_service(
     recognition_mode: RecognitionMode | str = RecognitionMode.HYBRID,
     skill_planner: Optional[SkillPlanner] = None,
     skill_planner_mode: str = "hybrid",
+    detection_explainer: Optional[DetectionExplainer] = None,
+    knowledge_base: Optional[ProjectKnowledgeBase] = None,
+    knowledge_answerer: Optional[KnowledgeAnswerer] = None,
 ) -> AgentService:
     store = SQLiteHistoryStore(db_path or OUTPUTS_DIR / "agent_history.sqlite3")
+    tools = AgentTools(store, detection_explainer=detection_explainer)
     return AgentService(
         store,
+        tools=tools,
         model_recognizer=model_recognizer,
         recognition_mode=recognition_mode,
         skill_planner=skill_planner,
         skill_planner_mode=skill_planner_mode,
+        knowledge_base=knowledge_base,
+        knowledge_answerer=knowledge_answerer,
     )

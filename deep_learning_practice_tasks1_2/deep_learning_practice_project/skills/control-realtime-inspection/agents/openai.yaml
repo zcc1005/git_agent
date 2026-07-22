@@ -1,0 +1,4 @@
+interface:
+  display_name: "控制持续实时巡检"
+  short_description: "查询持续实时巡检统计状态或安全停止当前后台巡检任务"
+  default_prompt: "使用 $control-realtime-inspection 查询当前实时巡检状态。"

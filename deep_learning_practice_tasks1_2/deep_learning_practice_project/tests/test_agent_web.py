@@ -16,6 +16,7 @@ class FakeAgentService:
         self.skill_calls = []
         self.history_messages = [{"role": "assistant", "content": "历史消息"}]
         self.monitoring_task_id = "monitor-abcdef123456"
+        self.realtime_task_id = "realtime-abcdef123456"
 
     def chat(self, message, *, session_id="default", context=None):
         self.chat_calls.append(
@@ -110,6 +111,25 @@ class FakeAgentService:
                     ],
                 },
             }
+        if skill_name == "start-realtime-inspection":
+            return {"skill_name": skill_name, "ok": True, "reply": "正在启动实时巡检...",
+                    "data": {"task_id": self.realtime_task_id, "source_id": "main-monitor", "status": "scheduled"}}
+        if skill_name == "control-realtime-inspection":
+            if arguments.get("action") == "stop":
+                return {"skill_name": skill_name, "ok": True, "reply": "已请求停止实时巡检。",
+                        "data": {"task_id": self.realtime_task_id, "status": "stop_requested"}}
+            if not arguments.get("task_id"):
+                return {"skill_name": skill_name, "ok": True, "reply": "找到实时巡检任务。",
+                        "data": {"found": True, "tasks": [{"task_id": self.realtime_task_id}]}}
+            return {"skill_name": skill_name, "ok": True, "reply": "实时巡检运行中。",
+                    "data": {"found": True, "task": {"task_id": self.realtime_task_id,
+                        "source_id": "main-monitor", "status": "running",
+                        "start_time": "2026-07-22T08:00:00+08:00", "end_time": "2026-07-22T08:02:00+08:00",
+                        "elapsed_seconds": 30, "frames_read": 750, "frames_inferred": 60,
+                        "inference_fps": 2.0, "events_detected": 1, "alarms_created": 1,
+                        "highest_risk_level": "high", "reconnect_count": 0,
+                        "latest_event_frame": "outputs/realtime/event_0001.jpg"},
+                        "events": [{"event_id": "event-1", "image_path": "outputs/realtime/event_0001.jpg"}]}}
         if skill_name != "control-monitoring-task":
             raise AssertionError(f"unexpected skill: {skill_name}")
         if arguments.get("action") == "stop":
@@ -216,6 +236,50 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertIn('name="media"', html)
         self.assertIn('data-agent-monitoring', html)
         self.assertIn('/api/agent/monitoring/events', html)
+        self.assertIn('data-realtime-events-endpoint="/api/agent/realtime-inspection/events"', html)
+        self.assertNotIn('data-agent-realtime-source', html)
+        self.assertNotIn('<strong>持续实时巡检</strong>', html)
+        self.assertNotIn('data-agent-followups', html)
+        self.assertNotIn('data-agent-followup=', html)
+        self.assertNotIn('id="agentPhaseTrack"', html)
+        self.assertNotIn('<span class="active">理解</span>', html)
+
+    def test_realtime_frontend_uses_sqlite_cursor_dedupe_and_updates_closed_card(self) -> None:
+        script = (
+            Path(__file__).resolve().parents[1] / "static" / "agent_chat" / "agent_chat.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('after_event_id', script)
+        self.assertIn('realtimeEventKey(event)', script)
+        self.assertIn('displayedRealtimeEvents.has(key)', script)
+        self.assertIn('event.event_status === "closed" ? "已关闭" : "持续中"', script)
+        self.assertIn('realtimeReportAnnouncedTaskId !== String(task.task_id)', script)
+        self.assertIn('new CustomEvent("agent:realtime-event"', script)
+
+    def test_knowledge_reference_is_rendered_as_compact_final_line(self) -> None:
+        script = (
+            Path(__file__).resolve().parents[1] / "static" / "agent_chat" / "agent_chat.js"
+        ).read_text(encoding="utf-8")
+        stylesheet = (
+            Path(__file__).resolve().parents[1] / "static" / "agent_chat" / "agent_chat.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('referenceMatch = normalizedText.match', script)
+        self.assertIn('agent-chat__knowledge-reference', script)
+        self.assertIn('.agent-chat__knowledge-reference', stylesheet)
+
+    def test_dashboard_records_realtime_events_without_verbose_task_copy(self) -> None:
+        script = (
+            Path(__file__).resolve().parents[1] / "static" / "web_app.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('function createRealtimeEventRecord(event, task = {})', script)
+        self.assertIn('sourceType: "agent"', script)
+        self.assertIn('eventCount: 1', script)
+        self.assertIn('saveHistoryRecord(createRealtimeEventRecord(item, task))', script)
+        self.assertIn('正在实时巡检${source}，时间：${start} 至 ${end}。', script)
+        self.assertIn('item?.sourceName === "智能体任务"', script)
+        self.assertNotIn('setAgentPhase(', script)
 
     def test_chat_endpoint_forwards_message_and_session(self) -> None:
         response = self.client.post(
@@ -227,6 +291,27 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertTrue(response.get_json()["ok"])
         self.assertEqual(self.service.chat_calls[0]["session_id"], "web-session")
         self.assertEqual(self.service.chat_calls[0]["message"], "查询上一轮结果")
+
+    def test_chat_endpoint_forwards_latest_detection_id_for_followup(self) -> None:
+        response = self.client.post(
+            "/api/agent/chat",
+            data={
+                "message": "为什么是高风险？",
+                "session_id": "web-session",
+                "detection_id": "det-current-123",
+                "task_id": "realtime-current-123",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.service.chat_calls[0]["context"]["detection_id"],
+            "det-current-123",
+        )
+        self.assertEqual(
+            self.service.chat_calls[0]["context"]["task_id"],
+            "realtime-current-123",
+        )
 
     def test_chat_endpoint_saves_video_and_builds_context(self) -> None:
         saved_video = Path("outputs/uploaded_videos/saved.mp4")
@@ -374,6 +459,46 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertEqual(call["skill_name"], "start-monitoring-task")
         self.assertEqual(call["session_id"], "web-session")
         self.assertNotIn("session_id", call["arguments"])
+
+    def test_realtime_inspection_start_stop_status_and_events_endpoints(self) -> None:
+        started = self.client.post(
+            "/api/agent/realtime-inspection/start",
+            json={"session_id": "web-session", "source_id": "main-monitor",
+                  "run_duration_seconds": 120, "sample_fps": 2},
+        )
+        self.assertEqual(started.status_code, 200)
+        self.assertEqual(started.get_json()["data"]["task_id"], self.service.realtime_task_id)
+        status = self.client.get(
+            f"/api/agent/realtime-inspection/status?session_id=web-session&task_id={self.service.realtime_task_id}"
+        )
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.get_json()["data"]["task"]["frames_inferred"], 60)
+        events = self.client.get(
+            f"/api/agent/realtime-inspection/events?session_id=web-session&task_id={self.service.realtime_task_id}"
+        )
+        self.assertEqual(len(events.get_json()["data"]["events"]), 1)
+        stopped = self.client.post(
+            "/api/agent/realtime-inspection/stop",
+            json={"session_id": "web-session", "task_id": self.service.realtime_task_id},
+        )
+        self.assertEqual(stopped.status_code, 200)
+        self.assertEqual(stopped.get_json()["data"]["status"], "stop_requested")
+
+    def test_realtime_event_endpoint_forwards_incremental_filters(self) -> None:
+        cursor = f"{self.service.realtime_task_id}-event-0001"
+        response = self.client.get(
+            "/api/agent/realtime-inspection/events"
+            f"?session_id=web-session&task_id={self.service.realtime_task_id}"
+            f"&after_event_id={cursor}&active_only=true&limit=25"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        call = self.service.skill_calls[-1]
+        self.assertEqual(call["skill_name"], "control-realtime-inspection")
+        self.assertEqual(call["arguments"]["after_event_id"], cursor)
+        self.assertTrue(call["arguments"]["active_only"])
+        self.assertTrue(call["arguments"]["events_only"])
+        self.assertEqual(call["arguments"]["limit"], 25)
 
     def test_monitoring_stop_endpoint_uses_control_skill(self) -> None:
         response = self.client.post(

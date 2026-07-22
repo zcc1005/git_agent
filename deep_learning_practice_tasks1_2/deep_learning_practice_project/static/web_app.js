@@ -82,16 +82,30 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && document.body.classList.contains("agent-drawer-open")) closeAgent();
 });
 
-function setAgentPhase(index, label, detail = "") {
-  const phases = [...document.querySelectorAll("#agentPhaseTrack span")];
-  phases.forEach((phase, phaseIndex) => {
-    phase.classList.toggle("done", phaseIndex < index);
-    phase.classList.toggle("active", phaseIndex === index);
-  });
+function setAgentTask(label, detail = "") {
   const labelNode = document.getElementById("agentPhaseLabel");
   const detailNode = document.getElementById("agentContextText");
   if (labelNode && label) labelNode.textContent = label;
   if (detailNode && detail) detailNode.textContent = detail;
+}
+
+function shortClock(value) {
+  const match = String(value || "").match(/[T\s](\d{2}):(\d{2})/);
+  return match ? `${match[1]}:${match[2]}` : "时间待定";
+}
+
+function realtimeTaskSentence(task) {
+  const source = String(task?.display_name || task?.source_id || "监控源");
+  const start = shortClock(task?.start_time || task?.started_at);
+  const end = shortClock(task?.end_time || task?.stopped_at);
+  const status = String(task?.status || "");
+  if (["completed", "stopped", "failed", "interrupted"].includes(status)) {
+    return `已结束${source}的实时巡检，时间：${start} 至 ${end}。`;
+  }
+  if (status === "scheduled") {
+    return `已安排${source}的实时巡检，时间：${start} 至 ${end}。`;
+  }
+  return `正在实时巡检${source}，时间：${start} 至 ${end}。`;
 }
 
 document.addEventListener("agent:status", (event) => {
@@ -100,14 +114,18 @@ document.addEventListener("agent:status", (event) => {
   const triggerStatus = document.getElementById("agentTriggerStatus");
   if (triggerStatus) triggerStatus.textContent = text;
   setStatus(text, busy ? "running" : "");
-  if (busy) setAgentPhase(1, text, "智能体正在理解任务并调用所需工具。");
+  if (busy) setAgentTask(text, "正在处理本次智能体任务。");
 });
 
 document.addEventListener("agent:response", (event) => {
   const response = event.detail?.data;
   if (!response || typeof response !== "object") return;
-  const reply = String(response.reply || "任务已完成。");
   const payload = response.data && typeof response.data === "object" ? response.data : {};
+  const realtimeTask = findRealtimeTask(response);
+  if (realtimeTask) {
+    setAgentTask("实时监测", realtimeTaskSentence(realtimeTask));
+    return;
+  }
   const risk = findNestedRisk(payload);
   const detectionLike = Boolean(
     risk
@@ -118,17 +136,30 @@ document.addEventListener("agent:response", (event) => {
   );
 
   if (!detectionLike) {
-    setAgentPhase(2, "任务已完成", reply);
+    setAgentTask("任务已完成", "已完成本次智能体任务。");
     return;
   }
 
   const record = createAgentRecord(response, payload, risk);
   saveHistoryRecord(record);
-  setAgentPhase(
-    record.riskLevel === "none" ? 2 : 3,
+  setAgentTask(
     record.riskLevel === "none" ? "分析完成" : "等待人工确认",
-    reply,
+    `已完成一次${record.sourceType === "image" ? "图片" : record.sourceType === "video" ? "视频" : "智能体"}检测。`,
   );
+});
+
+document.addEventListener("agent:realtime-status", (event) => {
+  const task = event.detail?.task;
+  if (!task?.task_id) return;
+  setAgentTask("实时监测", realtimeTaskSentence(task));
+  const events = Array.isArray(event.detail?.events) ? event.detail.events : [];
+  events.forEach((item) => saveHistoryRecord(createRealtimeEventRecord(item, task)));
+});
+
+document.addEventListener("agent:realtime-event", (event) => {
+  const item = event.detail?.event;
+  if (!item?.event_id) return;
+  saveHistoryRecord(createRealtimeEventRecord(item, event.detail?.task || {}));
 });
 
 function normalizeRisk(value) {
@@ -227,10 +258,51 @@ function createAgentRecord(response, payload, risk) {
   };
 }
 
+function realtimeEventReason(event) {
+  const report = event?.alarm_report?.document || {};
+  const overall = report.overall_risk || {};
+  const reportEvent = Array.isArray(report.events) ? report.events[0] || {} : {};
+  return String(reportEvent?.risk?.reason || overall.reason || event?.llm_summary || "实时巡检发现异物事件，等待人工复核。");
+}
+
+function createRealtimeEventRecord(event, task = {}) {
+  const classCounts = event.class_counts && Object.keys(event.class_counts).length
+    ? event.class_counts
+    : { [String(event.class_name || "未知异物")]: 1 };
+  const source = String(task.display_name || event.display_name || event.source_id || task.source_id || "监控源");
+  const alarmStatus = String(event.alarm_status || "pending").toLowerCase();
+  const frame = String(event.representative_frame || event.image_path || "");
+  return {
+    id: String(event.detection_id || `realtime-${event.task_id}-${event.event_id}`),
+    createdAt: String(event.detected_at || event.created_at || new Date().toISOString()),
+    sourceType: "agent",
+    sourceName: `${source}实时巡检`,
+    riskLevel: normalizeRisk(event.risk_level),
+    eventCount: 1,
+    classSummary: formatClassCounts(classCounts),
+    summary: `实时巡检发现 ${formatClassCounts(classCounts)}`,
+    report: String(event.alarm_report?.text || event.alarm_report || ""),
+    imageUrl: frame ? outputPathToUrl(frame) : "",
+    actionStatus: alarmStatus,
+    reason: realtimeEventReason(event),
+    taskId: String(event.task_id || task.task_id || ""),
+    eventId: String(event.event_id || ""),
+    eventStatus: String(event.event_status || "active"),
+  };
+}
+
 function loadHistoryRecords() {
   try {
     const current = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || "[]");
-    if (Array.isArray(current)) return current;
+    if (Array.isArray(current)) {
+      // Older builds mistakenly saved a realtime-task start response as a
+      // zero-event "智能体任务".  It is not a detection or alarm record.
+      return current.filter((item) => !(
+        String(item?.id || "").startsWith("agent-")
+        && item?.sourceName === "智能体任务"
+        && Number(item?.eventCount || 0) === 0
+      ));
+    }
   } catch (_error) {
     // Continue with an empty local view when storage is unavailable.
   }
@@ -429,10 +501,10 @@ async function sendAlarmAction(action) {
     writeHistoryRecords(records);
     renderAll(records);
     setStatus(action === "yes" ? "已确认" : "已取消");
-    setAgentPhase(3, action === "yes" ? "报警已确认" : "报警已取消", data.message || "报警处置已完成。");
+    setAgentTask(action === "yes" ? "报警已确认" : "报警已取消", "本次报警处置已完成。");
   } catch (error) {
     setStatus("处置失败", "error");
-    setAgentPhase(3, "处置失败", error.message);
+    setAgentTask("处置失败", "报警处置未完成，请在聊天框中重试。");
   }
 }
 

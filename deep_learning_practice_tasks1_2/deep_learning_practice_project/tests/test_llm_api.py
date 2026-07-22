@@ -323,6 +323,37 @@ class OpenAICompatiblePlannerTests(unittest.TestCase):
         self.assertEqual(arguments["start_time"], temporal["start_time"])
         self.assertEqual(arguments["end_time"], temporal["end_time"])
 
+    def test_realtime_window_replaces_duration_with_deterministic_absolute_time(self) -> None:
+        payload = {"steps": [{"skill_name": "start-realtime-inspection",
+                              "arguments": {"source_id": "main-monitor", "run_duration_seconds": 999,
+                                            "sample_fps": 2}}]}
+        temporal = {"kind": "absolute", "start_time": "2026-07-22T15:00:00+08:00",
+                    "end_time": "2026-07-22T15:30:00+08:00"}
+        normalized = OpenAICompatibleSkillPlanner._apply_temporal_resolution_to_payload(payload, temporal)
+        arguments = normalized["steps"][0]["arguments"]
+        self.assertNotIn("run_duration_seconds", arguments)
+        self.assertEqual(arguments["start_time"], temporal["start_time"])
+        self.assertEqual(arguments["end_time"], temporal["end_time"])
+
+    def test_realtime_start_without_end_condition_forces_clarification(self) -> None:
+        payload = {"needs_clarification": False, "steps": [
+            {"skill_name": "start-realtime-inspection", "arguments": {"source_id": "main-monitor"}}
+        ]}
+        normalized = OpenAICompatibleSkillPlanner._require_realtime_end_condition(payload)
+        self.assertTrue(normalized["needs_clarification"])
+        self.assertIn("多长时间", normalized["clarification"])
+        self.assertEqual(normalized["steps"], [])
+
+    def test_realtime_control_view_alias_is_normalized_to_query(self) -> None:
+        payload = {"steps": [{"skill_name": "control-realtime-inspection", "arguments": {"action": "view"}}]}
+        catalog = [{"name": "control-realtime-inspection", "input_schema": {
+            "type": "object", "properties": {"action": {"type": "string", "enum": ["query", "stop"],
+                                                          "aliases": {"view": "query"}}},
+            "additionalProperties": False,
+        }}]
+        plan = OpenAICompatibleSkillPlanner._parse_plan(payload, catalog=catalog)
+        self.assertEqual(plan.steps[0].arguments["action"], "query")
+
     def test_archived_detection_receives_deterministic_absolute_window(self) -> None:
         payload = {
             "steps": [
@@ -479,8 +510,8 @@ class AgentSkillOrchestrationTests(unittest.TestCase):
         )
         arguments = result["data"]["plan"]["steps"][0]["arguments"]
         self.assertNotIn("date", arguments)
-        self.assertEqual(arguments["start_time"], "2026-07-16T08:00:00+08:00")
-        self.assertEqual(arguments["end_time"], "2026-07-16T09:00:00+08:00")
+        self.assertEqual(arguments["start_time"], "2026-07-16 08:00:00")
+        self.assertEqual(arguments["end_time"], "2026-07-16 09:00:00")
 
     def test_video_offset_expression_is_injected_into_detection_plan(self) -> None:
         planner = StaticSkillPlanner(

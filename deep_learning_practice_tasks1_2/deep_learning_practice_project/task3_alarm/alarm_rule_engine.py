@@ -4,8 +4,10 @@ import argparse
 import json
 import sys
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
+from zoneinfo import ZoneInfo
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +30,7 @@ RISK_LEVEL_NAMES = {
 }
 RISK_SCORES = {"none": 0, "low": 1, "medium": 2, "high": 3}
 SCORE_LEVELS = {value: key for key, value in RISK_SCORES.items()}
+REPORT_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 # 规则基线沿用现有报警文本中的类别风险含义。当前YOLO只输出前五类，
@@ -275,11 +278,38 @@ def _overall_risk(
     }
 
 
+def _format_report_real_time(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(REPORT_TIMEZONE)
+    formatted = parsed.strftime("%Y-%m-%d %H:%M:%S")
+    if parsed.microsecond:
+        formatted += f".{parsed.microsecond // 1000:03d}"
+    return formatted
+
+
 def _event_time_text(event: Dict[str, Any], source_type: str) -> str:
     if source_type == "video":
-        start = event.get("start_video_time") or "未知时间"
-        end = event.get("end_video_time") or start
-        return f"视频时间{start}至{end}"
+        real_start = _format_report_real_time(event.get("start_real_time"))
+        real_end = _format_report_real_time(event.get("end_real_time")) or real_start
+        video_start = str(event.get("start_video_time") or "").strip()
+        video_end = str(event.get("end_video_time") or video_start).strip()
+        if real_start:
+            relative_text = (
+                f"（片段内时间{video_start}至{video_end}）"
+                if video_start
+                else ""
+            )
+            return f"北京时间{real_start}至{real_end}{relative_text}"
+        start = video_start or "未知时间"
+        end = video_end or start
+        return f"片段内时间{start}至{end}"
     return str(event.get("start_real_time") or "当前检测图片")
 
 

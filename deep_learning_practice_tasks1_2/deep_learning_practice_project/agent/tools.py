@@ -5,9 +5,15 @@ import threading
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, Mapping, Optional, Protocol, Sequence
 
 from agent.monitoring import ACTIVE_MONITORING_STATUSES, MonitoringTaskManager
+from agent.realtime_inspection import (
+    ACTIVE_STATUSES as ACTIVE_REALTIME_INSPECTION_STATUSES,
+    ActiveEvent,
+    RealtimeInspectionError,
+    RealtimeInspectionManager,
+)
 from agent.streaming import (
     RtspStreamCapture,
     RtspStreamProbe,
@@ -20,7 +26,7 @@ from agent.video_sources import (
     load_video_source_registry,
 )
 from project_config import OUTPUTS_DIR, PROJECT_ROOT, YOLO_MODEL_PATH
-from storage import AlarmRecord, SQLiteHistoryStore
+from storage import AlarmRecord, RealtimeInspectionTaskRecord, SQLiteHistoryStore
 
 from .archive import HistoricalStreamArchiveManager
 
@@ -62,12 +68,41 @@ StreamCaptureRunner = Callable[
 VideoSourceRegistryLoader = Callable[[], LongVideoSourceRegistry]
 
 
+class DetectionExplainer(Protocol):
+    """Narrow interface used by tools without coupling them to a specific LLM SDK."""
+
+    def summarize_detection(self, facts: Mapping[str, Any]) -> str:
+        ...
+
+    def explain_detection(
+        self,
+        question: str,
+        question_type: str,
+        facts: Mapping[str, Any],
+        history: Sequence[Mapping[str, Any]],
+    ) -> str:
+        ...
+
+
 RISK_NAMES = {
     "none": "无报警",
     "low": "低风险",
     "medium": "中风险",
     "high": "高风险",
 }
+
+ALARM_STATUS_NAMES = {
+    "pending": "待确认",
+    "confirmed": "已确认",
+    "cancelled": "已取消",
+    "inactive": "未触发",
+}
+QUICK_DETECTION_QUESTIONS = [
+    "为什么是高风险？",
+    "有什么处置建议？",
+    "查看同类历史",
+    "解释目标位置",
+]
 
 
 def _integer(value: Any, default: int = 0) -> int:
@@ -117,6 +152,8 @@ class AgentTools:
         video_source_registry_loader: Optional[VideoSourceRegistryLoader] = None,
         monitoring_manager: Optional[MonitoringTaskManager] = None,
         archive_manager: Optional[HistoricalStreamArchiveManager] = None,
+        realtime_inspection_manager: Optional[RealtimeInspectionManager] = None,
+        detection_explainer: Optional[DetectionExplainer] = None,
         now: Optional[Callable[[], datetime]] = None,
     ) -> None:
         self.store = store
@@ -131,9 +168,12 @@ class AgentTools:
         self._video_source_registry_loader = (
             video_source_registry_loader or load_video_source_registry
         )
+        self._detection_explainer = detection_explainer
+        self._realtime_summary_slot = threading.BoundedSemaphore(1)
         self._now = now or (lambda: datetime.now().astimezone())
         # Flask 请求与后台监控线程共享模型实例时，串行化重型推理，
         # 避免同一进程内同时占用 GPU/模型状态。
+        self._detection_lock = threading.RLock()
         self._detection_lock = threading.RLock()
         self._monitoring_manager = monitoring_manager or MonitoringTaskManager(
             self.store,
@@ -145,11 +185,366 @@ class AgentTools:
             self.capture_video_source,
             now=self._now,
         )
+        self._realtime_inspection_manager = realtime_inspection_manager or RealtimeInspectionManager(
+            self.store,
+            event_sink=self._persist_realtime_event,
+            detection_lock=self._detection_lock,
+            now=self._now,
+        )
 
     def current_time(self) -> datetime:
         """Return the clock used by tools so planning and execution share one time source."""
         current = self._now()
         return current if current.tzinfo is not None else current.astimezone()
+
+    def set_detection_explainer(
+        self, explainer: Optional[DetectionExplainer]
+    ) -> None:
+        """Attach or clear the optional LLM explanation adapter."""
+        self._detection_explainer = explainer
+
+    @staticmethod
+    def _deduplicated_text(values: Sequence[Any]) -> list[str]:
+        result: list[str] = []
+        for value in values:
+            text = str(value or "").strip()
+            if text and text not in result:
+                result.append(text)
+        return result
+
+    def detection_facts(
+        self,
+        detection_id: str,
+        *,
+        session_id: str = "",
+        source_name: str = "",
+        representative_frames: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Load the authoritative fact whitelist for one persisted detection."""
+        record = self.store.get_detection(detection_id)
+        if record is None or (session_id and record.session_id != session_id):
+            return None
+        alarm = self.store.get_alarm_for_detection(record.id)
+        document = dict(alarm.report) if alarm is not None else {}
+        overall = document.get("overall_risk") or {}
+        generated = document.get("generated_report") or {}
+        events = [item for item in document.get("events") or [] if isinstance(item, Mapping)]
+        document_summary = document.get("detection_summary") or {}
+        class_counts = dict(
+            document_summary.get("class_counts")
+            or record.summary.get("class_counts")
+            or {}
+        )
+        positions: list[Dict[str, Any]] = []
+        confidences: list[float] = []
+        risk_reasons: list[Any] = []
+        for event in events:
+            event_risk = event.get("risk") or {}
+            risk_reasons.append(event_risk.get("reason"))
+            event_id = _integer(event.get("event_id"), len(positions) + 1)
+            for obj in event.get("objects") or []:
+                if not isinstance(obj, Mapping):
+                    continue
+                confidence = _float(obj.get("confidence"), -1.0)
+                if confidence >= 0:
+                    confidences.append(confidence)
+                positions.append(
+                    {
+                        "event_id": event_id,
+                        "class_name": str(obj.get("class_name") or obj.get("class") or "未知异物"),
+                        "confidence": confidence if confidence >= 0 else None,
+                        "position": str(obj.get("position") or "未知区域"),
+                        "bbox_xyxy": list(obj.get("bbox_xyxy") or []),
+                    }
+                )
+            event_summary = event.get("detection_summary") or {}
+            if event_summary.get("max_confidence") is not None:
+                confidences.append(_float(event_summary.get("max_confidence")))
+        risk_reasons.append(overall.get("reason"))
+
+        frames = [dict(item) for item in representative_frames or [] if isinstance(item, Mapping)]
+        if not frames:
+            frames = (
+                self.video_event_frames(record.summary)
+                if record.source_type in {"video", "realtime"}
+                else self.image_event_frames(
+                    record.summary,
+                    str(record.summary.get("visualization_image") or ""),
+                )
+            )
+        if not frames:
+            for index, event in enumerate(events, start=1):
+                key_frame = str(event.get("key_frame") or "")
+                if key_frame:
+                    frames.append(
+                        {
+                            "event_id": _integer(event.get("event_id"), index),
+                            "key_frame": key_frame,
+                        }
+                    )
+
+        source = document.get("source") or {}
+        resolved_source_name = str(source_name or source.get("name") or "").strip()
+        if not resolved_source_name:
+            raw_source = str(record.source_path or "")
+            resolved_source_name = Path(raw_source).name or raw_source or "未知监控源"
+        detected_at = str(
+            record.source_started_at
+            or source.get("start_real_time")
+            or record.created_at
+        )
+        recommended_actions = self._deduplicated_text(
+            [generated.get("recommended_action")]
+        )
+        event_count = _integer(
+            document_summary.get("event_count"),
+            self._event_count(record.source_type, record.summary),
+        )
+        object_count = sum(max(0, _integer(value)) for value in class_counts.values())
+        if object_count == 0:
+            object_count = _integer(document_summary.get("detection_box_count"))
+        risk_level = str(
+            (alarm.risk_level if alarm is not None else "")
+            or record.risk_level
+            or overall.get("level")
+            or "none"
+        ).lower()
+        alarm_status = str(alarm.status if alarm is not None else "inactive")
+        return {
+            "detection_id": record.id,
+            "source_type": record.source_type,
+            "monitor_source": resolved_source_name,
+            "line_id": record.line_id,
+            "detected_at": detected_at,
+            "source_ended_at": record.source_ended_at,
+            "class_counts": class_counts,
+            "object_count": object_count,
+            "event_count": event_count,
+            "max_confidence": max(confidences) if confidences else None,
+            "risk_level": risk_level,
+            "risk_level_name": RISK_NAMES.get(risk_level, risk_level),
+            "risk_reasons": self._deduplicated_text(risk_reasons),
+            "recommended_actions": recommended_actions,
+            "alarm_status": alarm_status,
+            "alarm_status_name": ALARM_STATUS_NAMES.get(alarm_status, alarm_status),
+            "positions": positions,
+            "representative_frames": frames,
+        }
+
+    @staticmethod
+    def _fallback_summary(facts: Mapping[str, Any]) -> str:
+        classes = "、".join(
+            f"{name}{count}个" for name, count in dict(facts.get("class_counts") or {}).items()
+        ) or "未发现确认异物"
+        confidence = facts.get("max_confidence")
+        confidence_text = f"，最高置信度{float(confidence):.4f}" if confidence is not None else ""
+        reason = next(iter(facts.get("risk_reasons") or []), "以确定性规则结果为准")
+        action = next(iter(facts.get("recommended_actions") or []), "继续监测并结合代表帧人工复核")
+        text = (
+            f"本次在{facts.get('monitor_source') or '当前监控源'}检测到{classes}{confidence_text}，"
+            f"规则引擎判定为{facts.get('risk_level_name') or facts.get('risk_level')}。"
+            f"主要依据是{reason}建议{action}"
+        )
+        if len(text) < 80:
+            text += "正式类别、数量、风险等级和报警状态均以结构化预警结果为准。"
+        if len(text) > 150:
+            text = text[:149].rstrip("，；。") + "。"
+        return text
+
+    @staticmethod
+    def _analysis_conflicts_with_facts(
+        text: str,
+        facts: Mapping[str, Any],
+        history: Sequence[Mapping[str, Any]] = (),
+    ) -> bool:
+        if not text.strip():
+            return True
+        risk_labels = {"none": "无报警", "low": "低风险", "medium": "中风险", "high": "高风险"}
+        expected_risk = str(facts.get("risk_level") or "none")
+        for level, label in risk_labels.items():
+            if level != expected_risk and label in text:
+                return True
+        allowed_classes = set(dict(facts.get("class_counts") or {}))
+        for item in history:
+            allowed_classes.update(dict(item.get("class_counts") or {}))
+        known_tokens = {"石块异物", "塑料异物", "金属异物", "木块异物", "未知异物"}
+        for token in known_tokens:
+            if token in text and not any(token in name for name in allowed_classes):
+                return True
+        status_labels = {
+            "pending": "待确认",
+            "confirmed": "已确认",
+            "cancelled": "已取消",
+            "inactive": "未触发",
+        }
+        expected_status = str(facts.get("alarm_status") or "inactive")
+        for status, label in status_labels.items():
+            if status != expected_status and label in text:
+                return True
+        return False
+
+    def detection_presentation(
+        self,
+        session_id: str,
+        detection_id: str,
+        *,
+        source_name: str = "",
+        representative_frames: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        facts = self.detection_facts(
+            detection_id,
+            session_id=session_id,
+            source_name=source_name,
+            representative_frames=representative_frames,
+        )
+        if facts is None:
+            return {}
+        analysis, source = self._summarize_detection_facts(facts)
+        return {
+            "structured_alert": facts,
+            "ai_analysis": analysis,
+            "analysis_source": source,
+            "quick_questions": list(QUICK_DETECTION_QUESTIONS),
+        }
+
+    def _summarize_detection_facts(
+        self, facts: Mapping[str, Any]
+    ) -> tuple[str, str]:
+        analysis = ""
+        source = "fallback"
+        if self._detection_explainer is not None:
+            try:
+                candidate = str(self._detection_explainer.summarize_detection(facts)).strip()
+                if 80 <= len(candidate) <= 150 and not self._analysis_conflicts_with_facts(candidate, facts):
+                    analysis = candidate
+                    source = "llm"
+            except Exception:
+                analysis = ""
+        if not analysis:
+            analysis = self._fallback_summary(facts)
+        return analysis, source
+
+    def _similar_detection_history(
+        self,
+        detection_id: str,
+        class_counts: Mapping[str, Any],
+        limit: int,
+    ) -> list[Dict[str, Any]]:
+        class_names = set(str(name) for name in class_counts)
+        matches: list[Dict[str, Any]] = []
+        for record in self.store.query_detections(limit=max(100, limit * 10)):
+            if record.id == detection_id:
+                continue
+            historical_counts = dict(record.summary.get("class_counts") or {})
+            if class_names and not class_names.intersection(historical_counts):
+                continue
+            alarm = self.store.get_alarm_for_detection(record.id)
+            matches.append(
+                {
+                    "detection_id": record.id,
+                    "detected_at": record.source_started_at or record.created_at,
+                    "line_id": record.line_id,
+                    "risk_level": record.risk_level,
+                    "class_counts": historical_counts,
+                    "alarm_status": alarm.status if alarm is not None else "inactive",
+                }
+            )
+            if len(matches) >= limit:
+                break
+        return matches
+
+    @staticmethod
+    def _fallback_explanation(
+        question_type: str,
+        facts: Mapping[str, Any],
+        history: Sequence[Mapping[str, Any]],
+    ) -> str:
+        if question_type == "risk_reason":
+            reasons = "；".join(facts.get("risk_reasons") or []) or "未记录额外风险原因。"
+            return f"该记录的权威风险等级为{facts.get('risk_level_name')}。规则依据：{reasons}"
+        if question_type == "action_advice":
+            actions = "；".join(facts.get("recommended_actions") or []) or "继续监测并结合代表帧人工复核。"
+            return f"按规则引擎建议：{actions}报警当前状态为{facts.get('alarm_status_name')}。"
+        if question_type == "similar_history":
+            if not history:
+                return "历史库中暂未查询到与本次异物类别相同的其他检测记录。"
+            detail = "；".join(
+                f"{item['detected_at']}，{RISK_NAMES.get(str(item['risk_level']), item['risk_level'])}"
+                for item in history[:5]
+            )
+            return f"共找到{len(history)}条同类历史记录。最近记录：{detail}。"
+        if question_type == "target_position":
+            positions = facts.get("positions") or []
+            if not positions:
+                return "当前记录没有可用于解释位置的目标框信息，请查看代表帧进行人工确认。"
+            detail = "；".join(
+                f"事件{item['event_id']}的{item['class_name']}位于{item['position']}，框坐标{item['bbox_xyxy']}"
+                for item in positions[:5]
+            )
+            return f"位置来自检测框与图像尺寸的确定性换算：{detail}。"
+        return AgentTools._fallback_summary(facts)
+
+    def explain_detection_result(
+        self, session_id: str, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        detection_id = str(context.get("detection_id") or "").strip()
+        if not detection_id:
+            latest = self.store.latest_detection(session_id)
+            detection_id = latest.id if latest is not None else ""
+        if not detection_id:
+            return {
+                "ok": False,
+                "reply": "当前会话还没有检测记录，请先执行一次图片、视频或监控检测。",
+                "data": {"found": False, "needs_detection": True},
+            }
+        facts = self.detection_facts(detection_id, session_id=session_id)
+        if facts is None:
+            return {
+                "ok": False,
+                "reply": "当前会话找不到这条检测记录，请先执行一次检测。",
+                "data": {"found": False, "needs_detection": True},
+            }
+        question_type = str(context.get("question_type") or "general").strip().lower()
+        question = str(context.get("question") or "请解释这次检测结果").strip()
+        history = (
+            self._similar_detection_history(
+                detection_id,
+                facts.get("class_counts") or {},
+                max(1, min(_integer(context.get("history_limit"), 10), 50)),
+            )
+            if question_type == "similar_history"
+            else []
+        )
+        analysis = ""
+        source = "fallback"
+        if self._detection_explainer is not None:
+            try:
+                candidate = str(
+                    self._detection_explainer.explain_detection(
+                        question, question_type, facts, history
+                    )
+                ).strip()
+                if candidate and not self._analysis_conflicts_with_facts(candidate, facts, history):
+                    analysis = candidate
+                    source = "llm"
+            except Exception:
+                analysis = ""
+        if not analysis:
+            analysis = self._fallback_explanation(question_type, facts, history)
+        return {
+            "ok": True,
+            "reply": analysis,
+            "data": {
+                "found": True,
+                "detection_id": detection_id,
+                "question_type": question_type,
+                "authoritative_facts": facts,
+                "history_summary": history,
+                "ai_analysis": analysis,
+                "analysis_source": source,
+                "quick_questions": list(QUICK_DETECTION_QUESTIONS),
+            },
+        }
 
     def video_source_catalog(self) -> list[Dict[str, Any]]:
         """Return planner-safe source aliases without URLs or environment names."""
@@ -713,6 +1108,581 @@ class AgentTools:
             },
         }
 
+    def start_realtime_inspection(self, session_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        forbidden = {"rtsp_url", "line_id", "output_path", "model_path", "command", "python_code"}
+        supplied_forbidden = sorted(forbidden.intersection(context))
+        if supplied_forbidden:
+            return {"ok": False, "error_code": "invalid_parameters",
+                    "reply": f"实时巡检不允许传入字段：{', '.join(supplied_forbidden)}。", "data": {}}
+        source_id = str(context.get("source_id") or "").strip().lower()
+        try:
+            source = self._video_source_registry_loader().get(source_id)
+        except (FileNotFoundError, ValueError):
+            return {"ok": False, "error_code": "configuration_error", "reply": "视频源注册表配置无效。", "data": {}}
+        except LookupError:
+            return {"ok": False, "error_code": "source_not_found", "reply": f"未找到已注册的视频源：{source_id}", "data": {}}
+        if not source.is_rtsp or source.stream is None:
+            return {"ok": False, "error_code": "not_rtsp_source", "reply": f"{source.display_name}不是 RTSP 视频源。", "data": {}}
+        end_value = context.get("end_time")
+        duration_value = context.get("run_duration_seconds")
+        if bool(end_value) == bool(duration_value):
+            return {"ok": False, "error_code": "invalid_schedule",
+                    "reply": "必须且只能提供 end_time 或 run_duration_seconds 作为结束条件。", "data": {},
+                    "needs_clarification": not end_value and not duration_value}
+        current = self.current_time()
+        try:
+            start = datetime.fromisoformat(str(context.get("start_time")).replace("Z", "+00:00")) if context.get("start_time") else current
+            if start.tzinfo is None: raise ValueError("start_time 必须包含时区。")
+            if start < current - timedelta(seconds=1): raise ValueError("历史时间不能创建实时巡检任务。")
+            end = (datetime.fromisoformat(str(end_value).replace("Z", "+00:00"))
+                   if end_value else start + timedelta(seconds=float(duration_value)))
+            if end.tzinfo is None: raise ValueError("end_time 必须包含时区。")
+        except (TypeError, ValueError) as exc:
+            return {"ok": False, "error_code": "invalid_schedule", "reply": str(exc), "data": {}}
+        parameters = dict(context.get("parameters") or {})
+        forbidden_parameters = forbidden.intersection(parameters)
+        if forbidden_parameters:
+            return {"ok": False, "error_code": "invalid_parameters",
+                    "reply": f"parameters 不允许包含：{', '.join(sorted(forbidden_parameters))}。", "data": {}}
+        zone_id = str(context.get("zone_id") or "").strip().lower()
+        if zone_id and parameters.get("roi") is not None:
+            return {"ok": False, "error_code": "invalid_parameters", "reply": "zone_id 与 parameters.roi 不能同时提供。", "data": {}}
+        selected_zone: Dict[str, Any] = {}
+        if zone_id:
+            zone = next((item for item in source.zones if item.zone_id == zone_id), None)
+            if zone is None:
+                return {"ok": False, "error_code": "zone_not_found", "reply": f"视频源未注册区域：{zone_id}",
+                        "data": {"available_zones": [item.zone_id for item in source.zones]}}
+            parameters["roi"] = list(zone.roi)
+            selected_zone = {"zone_id": zone.zone_id, "display_name": zone.display_name, "roi": list(zone.roi)}
+        config = {
+            "parameters": parameters,
+            "reconnect_interval_seconds": float(context.get("reconnect_interval_seconds", 3.0)),
+            "max_consecutive_failures": int(context.get("max_consecutive_failures", 3)),
+            "min_event_hits": int(context.get("min_event_hits", 2)),
+            "event_silence_seconds": float(context.get("event_silence_seconds", 1.0)),
+        }
+        try:
+            task = self._realtime_inspection_manager.start_task(
+                session_id, source=source, start_time=start, end_time=end, zone_id=zone_id,
+                sample_fps=float(context.get("sample_fps", 2.0)), config=config,
+            )
+        except RealtimeInspectionError as exc:
+            return {"ok": False, "error_code": exc.code, "reply": str(exc), "data": {}}
+        return {"ok": True, "reply": f"正在启动{source.display_name}实时巡检，任务 {task.id}。",
+                "data": {**task.to_dict(), "display_name": source.display_name, "zone": selected_zone}}
+
+    def control_realtime_inspection(self, session_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        action = str(context.get("action") or "query").strip().lower()
+        action = {"view": "query", "show": "query", "status": "query", "get": "query", "cancel": "stop"}.get(action, action)
+        task_id = str(context.get("task_id") or "").strip().lower()
+        source_id = str(context.get("source_id") or "").strip().lower()
+        limit = max(1, min(int(context.get("limit", 10)), 100))
+        event_id = str(context.get("event_id") or "").strip().lower()
+        after_event_id = str(context.get("after_event_id") or "").strip().lower()
+        active_only = bool(context.get("active_only", False))
+        latest = bool(context.get("latest", False))
+        event_query = bool(event_id or after_event_id or active_only or latest or context.get("events_only"))
+        if action == "query":
+            if event_id:
+                selected_event = self.store.get_realtime_inspection_event(event_id)
+                task = (
+                    self.store.get_realtime_inspection_task(selected_event.task_id)
+                    if selected_event is not None else None
+                )
+                if task is None or task.session_id != session_id:
+                    return {"ok": False, "error_code": "event_not_found",
+                            "reply": "找不到当前会话的实时巡检事件。", "data": {}}
+                task_data = self._realtime_task_display_data(task)
+                event_data = self._realtime_event_display_data(selected_event)
+                return {"ok": True, "reply": f"已找到事件 {event_id} 的详细报告。",
+                        "data": {"found": True, "task": task_data, "events": [event_data],
+                                 "next_event_id": event_id}}
+            if task_id:
+                task = self.store.get_realtime_inspection_task(task_id)
+                if task is None or task.session_id != session_id:
+                    return {"ok": False, "error_code": "task_not_found", "reply": "找不到当前会话的实时巡检任务。", "data": {}}
+                events = self.store.list_realtime_inspection_events(
+                    task.id, limit, active_only=active_only,
+                    after_event_id=after_event_id, latest=latest,
+                )
+                if event_query and not after_event_id and not latest:
+                    events = list(reversed(events))
+                task_data = self._realtime_task_display_data(task)
+                report = self._realtime_inspection_report(task_data, events)
+                reply = (
+                    "当前实时巡检尚未确认异物事件。"
+                    if event_query and not events
+                    else self._realtime_task_status_reply(task_data)
+                )
+                event_values = [self._realtime_event_display_data(item) for item in events]
+                return {"ok": True, "reply": reply,
+                        "data": {"found": True, "task": task_data,
+                                 "events": event_values,
+                                 "next_event_id": event_values[-1]["event_id"] if event_values else after_event_id,
+                                 "realtime_report": report}}
+            tasks = self.store.list_realtime_inspection_tasks(session_id=session_id, source_id=source_id, limit=limit)
+            if not tasks:
+                return {"ok": True, "reply": "当前会话还没有实时巡检任务。",
+                        "data": {"found": False, "tasks": []}}
+            active = next(
+                (item for item in tasks if item.status in ACTIVE_REALTIME_INSPECTION_STATUSES),
+                tasks[0],
+            )
+            events = self.store.list_realtime_inspection_events(
+                active.id, limit, active_only=active_only,
+                after_event_id=after_event_id, latest=latest,
+            )
+            if event_query and not after_event_id and not latest:
+                events = list(reversed(events))
+            task_data = self._realtime_task_display_data(active)
+            report = self._realtime_inspection_report(task_data, events)
+            event_values = [self._realtime_event_display_data(item) for item in events]
+            return {
+                "ok": True,
+                "reply": (
+                    "当前实时巡检尚未确认异物事件。"
+                    if event_query and not events
+                    else self._realtime_task_status_reply(task_data)
+                ),
+                "data": {
+                    "found": True,
+                    "task": task_data,
+                    "tasks": [self._realtime_task_display_data(item) for item in tasks],
+                    "events": event_values,
+                    "next_event_id": event_values[-1]["event_id"] if event_values else after_event_id,
+                    "realtime_report": report,
+                },
+            }
+        if action != "stop":
+            return {"ok": False, "error_code": "invalid_action", "reply": "action 只能是 query 或 stop。", "data": {}}
+        if not task_id:
+            active = self.store.list_realtime_inspection_tasks(
+                session_id=session_id, source_id=source_id,
+                statuses=ACTIVE_REALTIME_INSPECTION_STATUSES, limit=1,
+            )
+            if not active:
+                recent = self.store.list_realtime_inspection_tasks(
+                    session_id=session_id, source_id=source_id, limit=1,
+                )
+                if recent:
+                    task_data = self._realtime_task_display_data(recent[0])
+                    return {
+                        "ok": True,
+                        "reply": self._realtime_terminal_stop_reply(task_data),
+                        "data": {"found": True, "task": task_data},
+                    }
+                return {"ok": True, "reply": "当前会话没有正在运行的实时巡检任务，无需停止。",
+                        "data": {"found": False}}
+            task_id = active[0].id
+        existing = self.store.get_realtime_inspection_task(task_id)
+        if existing is None or existing.session_id != session_id:
+            return {"ok": False, "error_code": "task_not_found", "reply": "找不到当前会话的实时巡检任务。", "data": {}}
+        if existing.status not in ACTIVE_REALTIME_INSPECTION_STATUSES:
+            task_data = self._realtime_task_display_data(existing)
+            return {"ok": True, "reply": self._realtime_terminal_stop_reply(task_data),
+                    "data": {"found": True, "task": task_data}}
+        try:
+            task = self._realtime_inspection_manager.stop_task(task_id, session_id=session_id)
+        except RealtimeInspectionError as exc:
+            return {"ok": False, "error_code": exc.code, "reply": str(exc), "data": {}}
+        return {"ok": True, "reply": f"已请求停止实时巡检任务 {task.id}，当前单帧推理结束后释放资源。", "data": task.to_dict()}
+
+    @staticmethod
+    def _realtime_terminal_stop_reply(task: Mapping[str, Any]) -> str:
+        status_names = {
+            "completed": "已经按计划完成",
+            "stopped": "已经停止",
+            "failed": "已经执行失败并结束",
+            "interrupted": "已经因服务重启而中断",
+        }
+        source_name = str(task.get("display_name") or task.get("source_id") or "当前监控")
+        status = status_names.get(str(task.get("status") or ""), "当前不在运行")
+        return f"{source_name}最近一次实时巡检{status}，无需重复停止。"
+
+    def _realtime_task_display_data(
+        self, task: RealtimeInspectionTaskRecord
+    ) -> Dict[str, Any]:
+        data = task.to_dict()
+        source = next(
+            (
+                item
+                for item in self.video_source_catalog()
+                if str(item.get("source_id") or "") == task.source_id
+            ),
+            None,
+        )
+        if source:
+            data["display_name"] = str(source.get("display_name") or task.source_id)
+        return data
+
+    def _realtime_event_display_data(self, record: Any) -> Dict[str, Any]:
+        event = record.to_dict() if hasattr(record, "to_dict") else dict(record)
+        alarm = self.store.get_alarm(str(event.get("alarm_id") or ""))
+        alarm_status = str(alarm.status if alarm is not None else "inactive")
+        metadata = event.get("metadata") if isinstance(event.get("metadata"), Mapping) else {}
+        event["alarm_status"] = alarm_status
+        event["alarm_status_name"] = ALARM_STATUS_NAMES.get(alarm_status, alarm_status)
+        event["risk_level_name"] = RISK_NAMES.get(
+            str(event.get("risk_level") or "none"), str(event.get("risk_level") or "none")
+        )
+        event["representative_frame"] = str(
+            event.get("representative_frame") or event.get("image_path") or ""
+        )
+        event["alarm_report"] = {
+            "text": str(event.get("alarm_report") or (alarm.report_text if alarm else "")),
+            "document": dict(alarm.report) if alarm is not None else {},
+            "json_path": str(metadata.get("alarm_json_path") or ""),
+            "report_path": str(metadata.get("alarm_report_path") or ""),
+        }
+        return event
+
+    def _schedule_realtime_event_summary(
+        self, event_id: str, facts: Mapping[str, Any]
+    ) -> None:
+        if self._detection_explainer is None:
+            return
+        if not self._realtime_summary_slot.acquire(blocking=False):
+            return
+
+        def enrich() -> None:
+            try:
+                summary, source = self._summarize_detection_facts(facts)
+                if source != "llm":
+                    return
+                current = self.store.get_realtime_inspection_event(event_id)
+                if current is None:
+                    return
+                metadata = dict(current.metadata)
+                metadata["analysis_source"] = "llm"
+                self.store.update_realtime_inspection_event(
+                    event_id, llm_summary=summary, metadata=metadata
+                )
+            except Exception:
+                # The formal event/report is already durable. LLM enrichment is optional.
+                return
+            finally:
+                self._realtime_summary_slot.release()
+
+        threading.Thread(
+            target=enrich,
+            name=f"realtime-summary-{event_id[-12:]}",
+            daemon=True,
+        ).start()
+
+    def _realtime_inspection_report(
+        self,
+        task: Mapping[str, Any],
+        events: Sequence[Any],
+    ) -> Dict[str, Any]:
+        class_counts: Dict[str, int] = {}
+        alarm_status_counts: Dict[str, int] = {}
+        risk_reasons: list[str] = []
+        recommended_actions: list[str] = []
+        report_events: list[Dict[str, Any]] = []
+        max_confidence: Optional[float] = None
+
+        for index, record in enumerate(events, start=1):
+            event = record.to_dict() if hasattr(record, "to_dict") else dict(record)
+            class_name = str(event.get("class_name") or "未知异物")
+            class_counts[class_name] = class_counts.get(class_name, 0) + 1
+            confidence = _float(event.get("confidence"), -1.0)
+            if confidence >= 0 and (max_confidence is None or confidence > max_confidence):
+                max_confidence = confidence
+
+            alarm = self.store.get_alarm(str(event.get("alarm_id") or ""))
+            alarm_status = str(alarm.status if alarm is not None else "inactive")
+            alarm_status_counts[alarm_status] = alarm_status_counts.get(alarm_status, 0) + 1
+            document = dict(alarm.report) if alarm is not None else {}
+            generated = document.get("generated_report") or {}
+            recommended_actions.extend(
+                self._deduplicated_text([generated.get("recommended_action")])
+            )
+            document_events = [
+                item for item in document.get("events") or [] if isinstance(item, Mapping)
+            ]
+            event_document = document_events[0] if document_events else {}
+            event_risk = event_document.get("risk") or {}
+            risk_reasons.extend(
+                self._deduplicated_text(
+                    [event_risk.get("reason"), (document.get("overall_risk") or {}).get("reason")]
+                )
+            )
+            objects = [item for item in event_document.get("objects") or [] if isinstance(item, Mapping)]
+            first_object = objects[0] if objects else {}
+            report_events.append(
+                {
+                    "event_number": index,
+                    "event_id": str(event.get("event_id") or index),
+                    "detected_at": str(event.get("detected_at") or ""),
+                    "ended_at": str(event.get("ended_at") or ""),
+                    "class_name": class_name,
+                    "confidence": confidence if confidence >= 0 else None,
+                    "risk_level": str(event.get("risk_level") or "none"),
+                    "risk_level_name": RISK_NAMES.get(
+                        str(event.get("risk_level") or "none"),
+                        str(event.get("risk_level") or "none"),
+                    ),
+                    "detection_id": str(event.get("detection_id") or ""),
+                    "alarm_id": str(event.get("alarm_id") or ""),
+                    "alarm_status": alarm_status,
+                    "alarm_status_name": ALARM_STATUS_NAMES.get(alarm_status, alarm_status),
+                    "image_path": str(event.get("image_path") or ""),
+                    "position": str(first_object.get("position") or "未知区域"),
+                    "bbox_xyxy": list(first_object.get("bbox_xyxy") or event.get("bbox") or []),
+                    "risk_reason": str(event_risk.get("reason") or ""),
+                }
+            )
+
+        risk_reasons = self._deduplicated_text(risk_reasons)
+        recommended_actions = self._deduplicated_text(recommended_actions)
+        risk_level = str(task.get("highest_risk_level") or "none")
+        statuses = list(alarm_status_counts)
+        alarm_status = statuses[0] if len(statuses) == 1 else ("mixed" if statuses else "inactive")
+        alarm_status_name = (
+            ALARM_STATUS_NAMES.get(alarm_status, alarm_status)
+            if alarm_status != "mixed"
+            else "多种状态"
+        )
+        facts = {
+            "monitor_source": str(task.get("display_name") or task.get("source_id") or "未知监控源"),
+            "class_counts": class_counts,
+            "object_count": len(report_events),
+            "event_count": len(report_events),
+            "max_confidence": max_confidence,
+            "risk_level": risk_level,
+            "risk_level_name": RISK_NAMES.get(risk_level, risk_level),
+            "risk_reasons": risk_reasons,
+            "recommended_actions": recommended_actions,
+            "alarm_status": alarm_status,
+            "alarm_status_name": alarm_status_name,
+        }
+        analysis, analysis_source = self._summarize_detection_facts(facts)
+        return {
+            "task_id": str(task.get("task_id") or ""),
+            "monitor_source": facts["monitor_source"],
+            "start_time": str(task.get("start_time") or ""),
+            "end_time": str(task.get("end_time") or ""),
+            "status": str(task.get("status") or ""),
+            "event_count": len(report_events),
+            "alarm_count": int(task.get("alarms_created") or 0),
+            "class_counts": class_counts,
+            "max_confidence": max_confidence,
+            "risk_level": risk_level,
+            "risk_level_name": facts["risk_level_name"],
+            "alarm_status_counts": alarm_status_counts,
+            "events": report_events,
+            "ai_analysis": analysis,
+            "analysis_source": analysis_source,
+        }
+
+    @staticmethod
+    def _realtime_task_status_reply(task: Mapping[str, Any]) -> str:
+        status_names = {
+            "scheduled": "等待开始",
+            "connecting": "正在连接",
+            "running": "运行中",
+            "reconnecting": "正在重连",
+            "stop_requested": "正在停止",
+            "completed": "已按计划完成",
+            "stopped": "已人工停止",
+            "failed": "执行失败",
+            "interrupted": "服务重启后中断",
+        }
+        status = str(task.get("status") or "")
+        if status in {"completed", "stopped", "failed", "interrupted"}:
+            return AgentTools._realtime_terminal_summary(task)
+        source_name = str(task.get("display_name") or task.get("source_id") or "当前监控")
+        reply = (
+            f"{source_name}实时巡检{status_names.get(status, status or '状态未知')}："
+            f"已运行{float(task.get('elapsed_seconds') or 0):.1f}秒，"
+            f"读取{int(task.get('frames_read') or 0)}帧，"
+            f"推理{int(task.get('frames_inferred') or 0)}帧，"
+            f"实际检测FPS {float(task.get('inference_fps') or 0):.2f}；"
+            f"发现{int(task.get('events_detected') or 0)}个事件，"
+            f"创建{int(task.get('alarms_created') or 0)}个报警，"
+            f"最高风险为{RISK_NAMES.get(str(task.get('highest_risk_level') or 'none'), task.get('highest_risk_level') or 'none')}，"
+            f"重连{int(task.get('reconnect_count') or 0)}次。"
+        )
+        error = str(task.get("last_error_message") or "").strip()
+        return f"{reply}最近错误：{error}" if error else reply
+
+    @staticmethod
+    def _realtime_terminal_summary(task: Mapping[str, Any]) -> str:
+        status = str(task.get("status") or "")
+        if status == "completed":
+            title, reason = "【实时巡检已结束】", "达到计划结束时间"
+        elif status == "stopped":
+            title, reason = "【实时巡检已停止】", "用户主动停止"
+        else:
+            title = "【实时巡检异常结束】"
+            reason = str(task.get("last_error_message") or "服务重启导致任务中断")
+        lines = [
+            title,
+            f"视频源：{task.get('display_name') or task.get('source_id') or '未知'}",
+            f"任务ID：{task.get('task_id') or ''}",
+            f"开始时间：{task.get('started_at') or task.get('start_time') or ''}",
+            f"结束时间：{task.get('stopped_at') or task.get('end_time') or ''}",
+            f"运行时长：{float(task.get('elapsed_seconds') or 0):.1f}秒",
+            f"读取帧数：{int(task.get('frames_read') or 0)}",
+            f"推理帧数：{int(task.get('frames_inferred') or 0)}",
+            f"确认事件数：{int(task.get('events_detected') or 0)}",
+            f"报警数：{int(task.get('alarms_created') or 0)}",
+            f"最高风险等级：{RISK_NAMES.get(str(task.get('highest_risk_level') or 'none'), task.get('highest_risk_level') or 'none')}",
+            f"结束原因：{reason}",
+        ]
+        if status in {"failed", "interrupted"}:
+            lines.append(f"安全错误码：{task.get('last_error_code') or 'task_interrupted'}")
+        return "\n".join(lines)
+
+    def _persist_realtime_event(self, task: RealtimeInspectionTaskRecord, event: ActiveEvent) -> Mapping[str, Any]:
+        from task3_alarm.alarm_rule_engine import complete_detection_alarm
+
+        event_id = f"{task.id}-event-{event.sequence:04d}"
+        existing_event = self.store.get_realtime_inspection_event(event_id)
+        output_dir = OUTPUTS_DIR / "realtime_inspections" / task.source_id / task.id / "events"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        image_path = output_dir / f"event_{event.sequence:04d}.jpg"
+        if existing_event is None or event.representative_updated or not image_path.is_file():
+            try:
+                from video_detection import _write_detection_frame
+                _write_detection_frame(event.representative_frame, [event.representative_object], [], image_path)
+            except Exception as exc:
+                raise RealtimeInspectionError("inference_failed", "代表帧保存失败。") from exc
+        image_display = self._display_path(image_path)
+        start_text = event.first_seen.isoformat(sep=" ", timespec="seconds")
+        end_text = event.last_seen.isoformat(sep=" ", timespec="seconds")
+        obj = dict(event.representative_object)
+        track_id = obj.get("track_id")
+        class_counts = {event.class_name: 1}
+        video_event = {
+            "event_id": 1, "start_offset_seconds": 0.0,
+            "end_offset_seconds": max(0.0, (event.last_seen - event.first_seen).total_seconds()),
+            "start_video_time": "00:00:00.000", "end_video_time": "00:00:00.000",
+            "start_real_time": start_text, "end_real_time": end_text,
+            "object_count": 1, "max_simultaneous_objects": 1, "unique_object_count": 1,
+            "class_counts": class_counts, "classes": [event.class_name], "observed_classes": [event.class_name],
+            "max_confidence": event.confidence, "positive_sample_count": event.hit_count,
+            "track_ids": [track_id] if track_id is not None else [],
+            "tracks": [{"track_id": track_id, "class": event.class_key, "class_name": event.class_name,
+                        "max_confidence": event.confidence, "confirmed_observation_count": event.hit_count,
+                        "representative_frame": image_display, "representative_object": obj}],
+            "key_frame": image_display,
+            "key_frames": [{"image": image_display, "real_time": start_text, "object_count": 1,
+                            "class_counts": class_counts, "track_ids": [track_id] if track_id is not None else []}],
+            "frame_images": [image_display],
+        }
+        existing_detection = (
+            self.store.get_detection(existing_event.detection_id)
+            if existing_event is not None else None
+        )
+        created_at = str(
+            (existing_detection.summary.get("created_at") if existing_detection else "")
+            or self.current_time().isoformat(sep=" ", timespec="seconds")
+        )
+        detection = {
+            "status": "completed", "created_at": created_at,
+            "video": f"realtime://{task.source_id}/{task.id}", "video_start_time": start_text,
+            "video_end_time": end_text, "duration_seconds": video_event["end_offset_seconds"],
+            "source_fps": None, "requested_sample_fps": task.sample_fps, "sample_fps": task.sample_fps,
+            "sampled_frames": event.hit_count, "positive_frames": event.hit_count,
+            "num_detection_boxes": event.hit_count, "unique_object_count": 1,
+            "has_foreign_object": True, "num_events": 1, "class_counts": class_counts,
+            "events": [video_event], "tracks": video_event["tracks"], "detection_frames": [],
+            "thresholds": task.config.get("parameters") or {},
+        }
+        result_json = output_dir / f"event_{event.sequence:04d}.json"
+        alarm_json = output_dir / f"event_{event.sequence:04d}_alarm.json"
+        report_path = output_dir / f"event_{event.sequence:04d}_report.txt"
+        result_json.write_text(json.dumps(detection, ensure_ascii=False, indent=2), encoding="utf-8")
+        alarm_document, alarm_report = complete_detection_alarm(
+            detection, input_json=result_json, output_json=alarm_json, output_txt=report_path, source_type="video"
+        )
+        if existing_event is None:
+            detection_record, alarm_record = self.store.record_detection(
+                task.session_id, source_type="realtime", source_path=f"realtime://{task.source_id}/{task.id}",
+                detection=detection, alarm_document=alarm_document, alarm_report=alarm_report,
+                line_id=task.line_id, source_started_at=start_text, source_ended_at=end_text,
+            )
+        else:
+            alarm_document["report_id"] = existing_event.alarm_id
+            alarm_json.write_text(
+                json.dumps(alarm_document, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            detection_record, alarm_record = self.store.update_detection_alarm(
+                existing_event.detection_id, existing_event.alarm_id,
+                detection=detection, alarm_document=alarm_document,
+                alarm_report=alarm_report, source_ended_at=end_text,
+            )
+        generated = alarm_document.get("generated_report") or {}
+        document_events = [
+            item for item in alarm_document.get("events") or [] if isinstance(item, Mapping)
+        ]
+        risk_reasons = self._deduplicated_text(
+            [
+                ((document_events[0].get("risk") or {}).get("reason") if document_events else ""),
+                (alarm_document.get("overall_risk") or {}).get("reason"),
+            ]
+        )
+        recommended_actions = self._deduplicated_text(
+            [generated.get("recommended_action")]
+        )
+        summary_facts = {
+            "monitor_source": task.source_id,
+            "class_counts": class_counts,
+            "object_count": 1,
+            "max_confidence": event.confidence,
+            "risk_level": alarm_record.risk_level,
+            "risk_level_name": RISK_NAMES.get(alarm_record.risk_level, alarm_record.risk_level),
+            "risk_reasons": risk_reasons,
+            "recommended_actions": recommended_actions,
+            "alarm_status": alarm_record.status,
+            "alarm_status_name": ALARM_STATUS_NAMES.get(alarm_record.status, alarm_record.status),
+        }
+        llm_summary = (
+            existing_event.llm_summary
+            if existing_event is not None
+            else self._fallback_summary(summary_facts)
+        )
+        metadata = {"event_id": event_id, "task_id": task.id, "source_id": task.source_id,
+                    "line_id": task.line_id, "detected_at": start_text, "ended_at": end_text,
+                    "last_seen_at": end_text, "event_status": event.event_status,
+                    "class_name": event.class_name, "confidence": event.confidence, "bbox": event.bbox,
+                    "hit_count": event.hit_count, "risk_level": alarm_record.risk_level,
+                    "class_counts": class_counts, "max_confidence": event.confidence,
+                    "detection_id": detection_record.id, "alarm_id": alarm_record.id,
+                    "alarm_status": alarm_record.status, "image_path": image_display,
+                    "llm_summary": llm_summary, "analysis_source": (
+                        str(existing_event.metadata.get("analysis_source") or "fallback")
+                        if existing_event is not None else "fallback"
+                    ), "alarm_json_path": self._display_path(alarm_json),
+                    "alarm_report_path": self._display_path(report_path)}
+        result_json.write_text(json.dumps({**detection, **metadata}, ensure_ascii=False, indent=2), encoding="utf-8")
+        if existing_event is None:
+            self.store.record_realtime_inspection_event(
+                event_id=event_id, task_id=task.id, source_id=task.source_id,
+                detected_at=start_text, ended_at=end_text, last_seen_at=end_text,
+                event_status=event.event_status, class_name=event.class_name,
+                confidence=event.confidence, max_confidence=event.confidence,
+                bbox=event.bbox, risk_level=alarm_record.risk_level,
+                detection_id=detection_record.id, alarm_id=alarm_record.id, image_path=image_display,
+                metadata=metadata, line_id=task.line_id, hit_count=event.hit_count,
+                class_counts=class_counts, alarm_report=alarm_report, llm_summary=llm_summary,
+            )
+        else:
+            self.store.update_realtime_inspection_event(
+                event_id, ended_at=end_text, last_seen_at=end_text,
+                event_status=event.event_status, class_name=event.class_name,
+                confidence=event.confidence, max_confidence=event.confidence,
+                bbox=event.bbox, risk_level=alarm_record.risk_level,
+                image_path=image_display, hit_count=event.hit_count,
+                class_counts=class_counts, metadata=metadata,
+                alarm_report=alarm_report, llm_summary=llm_summary,
+            )
+        if existing_event is None:
+            self._schedule_realtime_event_summary(event_id, summary_facts)
+        return metadata
+
     def control_stream_archive(
         self,
         session_id: str,
@@ -1059,11 +2029,16 @@ class AgentTools:
         parameters = dict(context.get("parameters") or {})
         with self._detection_lock:
             outcome = self._image_detection_runner(image_path, parameters)
+        stored_detection = dict(outcome.detection)
+        if outcome.visualization_image:
+            stored_detection["visualization_image"] = outcome.visualization_image
+        if outcome.visualization_dir:
+            stored_detection["visualization_dir"] = outcome.visualization_dir
         detection_record, alarm_record = self.store.record_detection(
             session_id,
             source_type="image",
             source_path=str(image_path),
-            detection=outcome.detection,
+            detection=stored_detection,
             alarm_document=outcome.alarm_document,
             alarm_report=outcome.alarm_report,
             line_id=str(context.get("line_id") or ""),
@@ -1243,7 +2218,7 @@ class AgentTools:
                 "alarm_report": record.alarm_report,
                 "event_frames": (
                     self.video_event_frames(record.summary)
-                    if record.source_type == "video"
+                    if record.source_type in {"video", "realtime"}
                     else self.image_event_frames(record.summary)
                 ),
             },
@@ -1540,6 +2515,9 @@ class AgentTools:
     def _control_alarm(
         self, action: str, session_id: str, context: Dict[str, Any]
     ) -> Dict[str, Any]:
+        scope = str(context.get("scope") or "single").strip().lower()
+        if scope == "realtime_task":
+            return self._control_realtime_task_alarms(action, session_id, context)
         alarm_id = str(context.get("alarm_id") or "").strip()
         alarm = self.store.get_alarm(alarm_id) if alarm_id else None
         if alarm is None:
@@ -1574,6 +2552,89 @@ class AgentTools:
                 "alarm_id": updated.id,
                 "alarm_status": updated.status,
                 "risk_level": updated.risk_level,
+            },
+        }
+
+    def _control_realtime_task_alarms(
+        self, action: str, session_id: str, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        task_id = str(context.get("task_id") or "").strip().lower()
+        task = self.store.get_realtime_inspection_task(task_id) if task_id else None
+        if task is None and not task_id:
+            recent = self.store.list_realtime_inspection_tasks(
+                session_id=session_id, limit=1,
+            )
+            task = recent[0] if recent else None
+        if task is None or task.session_id != session_id:
+            return {
+                "ok": False,
+                "reply": "当前会话找不到可闭环的实时巡检任务。",
+                "data": {"found": False, "scope": "realtime_task"},
+            }
+
+        events = self.store.list_realtime_inspection_events(task.id, limit=None)
+        alarm_ids = list(dict.fromkeys(
+            str(event.alarm_id).strip() for event in events if str(event.alarm_id).strip()
+        ))
+        if not alarm_ids:
+            return {
+                "ok": True,
+                "reply": "本轮实时巡检没有产生需要确认或取消的报警。",
+                "data": {
+                    "found": True,
+                    "scope": "realtime_task",
+                    "task_id": task.id,
+                    "affected_count": 0,
+                    "unchanged_count": 0,
+                    "skipped_count": 0,
+                },
+            }
+
+        target_status = "confirmed" if action == "confirm" else "cancelled"
+        affected_ids: list[str] = []
+        unchanged_ids: list[str] = []
+        skipped_ids: list[str] = []
+        for alarm_id in alarm_ids:
+            alarm = self.store.get_alarm(alarm_id)
+            if alarm is None or alarm.session_id != session_id or alarm.status == "inactive":
+                skipped_ids.append(alarm_id)
+                continue
+            if alarm.status == target_status:
+                unchanged_ids.append(alarm_id)
+                continue
+            if self._alarm_control_handler is not None:
+                self._alarm_control_handler(action, alarm)
+            self.store.set_alarm_action(
+                alarm.id,
+                session_id,
+                action,
+                note=str(context.get("note") or ""),
+            )
+            affected_ids.append(alarm.id)
+
+        action_text = "确认" if action == "confirm" else "取消"
+        reply = f"已{action_text}本轮实时巡检的{len(affected_ids)}条报警"
+        details = []
+        if unchanged_ids:
+            details.append(f"{len(unchanged_ids)}条此前已是该状态")
+        if skipped_ids:
+            details.append(f"{len(skipped_ids)}条不可操作或记录缺失")
+        if details:
+            reply += "；" + "，".join(details)
+        reply += "。"
+        return {
+            "ok": True,
+            "reply": reply,
+            "data": {
+                "found": True,
+                "scope": "realtime_task",
+                "task_id": task.id,
+                "action": action,
+                "alarm_status": target_status,
+                "affected_count": len(affected_ids),
+                "unchanged_count": len(unchanged_ids),
+                "skipped_count": len(skipped_ids),
+                "alarm_ids": affected_ids,
             },
         }
 

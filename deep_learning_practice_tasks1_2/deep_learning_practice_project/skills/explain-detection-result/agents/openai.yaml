@@ -1,0 +1,4 @@
+interface:
+  display_name: "解释检测结果"
+  short_description: "基于权威检测事实解释风险原因、处置建议、同类历史记录与目标位置"
+  default_prompt: "使用 $explain-detection-result 解释当前会话最近一次检测为什么被判为该风险等级。"

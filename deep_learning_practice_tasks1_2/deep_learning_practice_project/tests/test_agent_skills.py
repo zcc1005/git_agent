@@ -197,6 +197,9 @@ class AgentSkillTests(unittest.TestCase):
                 "control-monitoring-task",
                 "control-stream-archive",
                 "detect-archived-video",
+                "start-realtime-inspection",
+                "control-realtime-inspection",
+                "explain-detection-result",
             },
         )
         alarm_spec = next(item for item in catalog if item["name"] == "control-alarm")
@@ -211,6 +214,19 @@ class AgentSkillTests(unittest.TestCase):
         self.assertEqual(monitoring_action["enum"], ["query", "stop"])
         self.assertEqual(monitoring_action["aliases"]["view"], "query")
         self.assertEqual(monitoring_action["aliases"]["cancel"], "stop")
+        explanation_spec = next(
+            item for item in catalog if item["name"] == "explain-detection-result"
+        )
+        self.assertEqual(
+            explanation_spec["input_schema"]["properties"]["question_type"]["enum"],
+            [
+                "risk_reason",
+                "action_advice",
+                "similar_history",
+                "target_position",
+                "general",
+            ],
+        )
         for item in catalog:
             self.assertIn("input_schema", item)
             self.assertFalse(item["input_schema"]["additionalProperties"])

@@ -209,6 +209,8 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
         system_prompt = (
             "你是工业皮带异物检测系统的任务规划器。你只负责理解、参数抽取和 Skill 编排，"
             "不得自行判断检测结果、风险等级、报警状态或虚构文件。\n"
+            "关于系统功能、配置、参数含义、文件位置、Skill说明或使用方法的知识问题不应"
+            "强行规划为 Skill；此类问题由外层 knowledge 模式处理。"
             "只可使用提供的封闭 Skill catalog，最多返回 6 个步骤。检测 Skill 已包含确定性风险"
             "研判、历史入库和报警创建，不要重复调用 assess-risk。\n"
             "报警 confirm/cancel 及 review-detection 写操作只有在用户明确要求时才能规划。"
@@ -249,6 +251,17 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
             '"clarification":"","steps":[{"skill_name":"query-history",'
             '"arguments":{}}]}。'
         )
+        system_prompt += (
+            "\n严格区分：每隔一段时间检测调用 start-monitoring-task；持续实时巡检、持续连接检测或每秒检测N帧调用 start-realtime-inspection。"
+            "start-realtime-inspection 必须且只能给出 end_time 或 run_duration_seconds；没有结束条件时必须 needs_clarification=true，"
+            "询问运行多长时间或到几点结束，不得改成 start-monitoring-task。sample_fps 范围为0.2到10且放在顶层。"
+            "查看实时巡检调用 control-realtime-inspection/action=query；只有明确停止时才用 action=stop；禁止 view/show/get/status/cancel。"
+            "在线探测仍用 probe-video-source，当前定长检测仍用 detect-video-source，录像归档仍用 control-stream-archive，"
+            "过去录像检测仍用 detect-archived-video。不得传 rtsp_url、line_id、output_path、model_path、命令或Python代码。"
+            "用户围绕已有检测询问风险原因、处置建议、同类历史或目标位置时，调用 explain-detection-result。"
+            "detection_id 优先使用 context.request_context.detection_id；未提供时允许执行层读取当前会话最近一次检测。"
+            "解释 Skill 只能说明数据库与规则引擎中的既有事实，不能改写类别、数量、置信度、风险等级或报警状态。"
+        )
         user_prompt = json.dumps(
             {
                 "user_message": message,
@@ -268,7 +281,31 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
             payload,
             safe_context["temporal_resolution"],
         )
+        payload = self._require_realtime_end_condition(payload)
         return self._parse_plan(payload, catalog=catalog)
+
+    @staticmethod
+    def _require_realtime_end_condition(payload: Mapping[str, Any]) -> Dict[str, Any]:
+        normalized = dict(payload)
+        steps = payload.get("steps")
+        if not isinstance(steps, list):
+            return normalized
+        for step in steps:
+            if not isinstance(step, Mapping) or step.get("skill_name") != "start-realtime-inspection":
+                continue
+            arguments = step.get("arguments")
+            missing = not isinstance(arguments, Mapping) or (
+                not arguments.get("end_time") and arguments.get("run_duration_seconds") is None
+            )
+            if missing:
+                normalized.update(
+                    needs_clarification=True,
+                    clarification="请补充实时巡检运行多长时间，或明确到几点结束。",
+                    steps=[],
+                )
+                break
+        return normalized
+
 
     @staticmethod
     def _apply_temporal_resolution_to_payload(
@@ -294,10 +331,11 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
                     "query-history",
                     "generate-risk-report",
                     "start-monitoring-task",
+                    "start-realtime-inspection",
                     "detect-archived-video",
                 }:
                     arguments.pop("date", None)
-                    if skill_name == "start-monitoring-task":
+                    if skill_name in {"start-monitoring-task", "start-realtime-inspection"}:
                         arguments.pop("run_duration_seconds", None)
                     arguments["start_time"] = temporal_resolution["start_time"]
                     arguments["end_time"] = temporal_resolution["end_time"]
@@ -431,6 +469,187 @@ class OpenAICompatibleSkillPlanner(SkillPlanner):
             raise LLMAPIError(f"Skill {skill_name} 参数协议校验失败：{exc}") from exc
 
 
+class OpenAICompatibleDetectionExplainer:
+    """Generate bounded explanations from an authoritative detection fact whitelist."""
+
+    def __init__(self, client: OpenAICompatibleClient) -> None:
+        self.client = client
+
+    @staticmethod
+    def _analysis(payload: Mapping[str, Any]) -> str:
+        value = payload.get("analysis")
+        if not isinstance(value, str) or not value.strip():
+            raise LLMAPIError("大模型检测解释缺少 analysis 文本")
+        return value.strip()
+
+    def summarize_detection(self, facts: Mapping[str, Any]) -> str:
+        payload = self.client.complete_json(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是工业皮带检测结果解释助手。只能解释用户提供的权威事实，不能重新检测或重新评级。"
+                        "类别、数量、最高置信度、风险等级和报警状态必须逐字忠于事实；不得补充未提供的类别。"
+                        "不得猜测重量、真实材质、实际距离、速度或设备是否已经损坏。"
+                        "用80至150个中文字符概述检测概况、主要规则风险原因和一条简短处置建议。"
+                        "只返回JSON对象：{\"analysis\":\"...\"}。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"authoritative_detection_facts": dict(facts)},
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                },
+            ]
+        )
+        return self._analysis(payload)
+
+    def explain_detection(
+        self,
+        question: str,
+        question_type: str,
+        facts: Mapping[str, Any],
+        history: Sequence[Mapping[str, Any]],
+    ) -> str:
+        payload = self.client.complete_json(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是工业皮带检测结果追问解释助手。回答只能基于 authoritative_detection_facts "
+                        "和 similar_history，风险等级仍由规则引擎和数据库决定。"
+                        "不得改变或重新判断异物类别、数量、置信度、风险等级、报警状态；"
+                        "不得编造重量、真实材质、实际距离、设备损坏情况或未提供的现场信息。"
+                        "解释位置时说明位置来自检测框/图像坐标，不把像素坐标说成真实距离。"
+                        "如果证据不足，要明确说未记录。只返回JSON对象：{\"analysis\":\"...\"}。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "question": question,
+                            "question_type": question_type,
+                            "authoritative_detection_facts": dict(facts),
+                            "similar_history": [dict(item) for item in history],
+                        },
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                },
+            ]
+        )
+        return self._analysis(payload)
+
+
+class OpenAICompatibleKnowledgeAnswerer:
+    """Answer project questions from repository excerpts only."""
+
+    def __init__(self, client: OpenAICompatibleClient) -> None:
+        self.client = client
+
+    def classify_request(
+        self,
+        message: str,
+        history: Sequence[Mapping[str, Any]],
+    ) -> Mapping[str, Any]:
+        safe_history = [
+            {
+                "role": str(item.get("role") or ""),
+                "content": str(item.get("content") or "")[:500],
+            }
+            for item in history[-4:]
+            if isinstance(item, Mapping)
+        ]
+        payload = self.client.complete_json(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你只负责给工业皮带检测智能体的用户请求分类，不回答问题、不调用工具。"
+                        "mode只能是 execute、dynamic、knowledge、clarify："
+                        "execute表示用户要求检测、启动、停止、确认、取消或生成等动作；"
+                        "dynamic表示查询当前在线状态、任务状态、真实报警或历史数据；"
+                        "knowledge表示询问系统功能、概念、参数、文件位置、配置或使用方法；"
+                        "clarify表示意图或必要对象不足。"
+                        "例如‘报警记录保存在哪里’是knowledge，‘查看当前报警’是dynamic，"
+                        "‘确认报警’是execute。只返回JSON："
+                        "{\"mode\":\"knowledge\",\"clarification\":\"\"}。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"message": message, "recent_context": safe_history},
+                        ensure_ascii=False,
+                    ),
+                },
+            ]
+        )
+        mode = str(payload.get("mode") or "").strip().lower()
+        if mode not in {"execute", "dynamic", "knowledge", "clarify"}:
+            raise LLMAPIError("大模型请求分类返回了无效 mode")
+        return {
+            "mode": mode,
+            "clarification": str(payload.get("clarification") or "").strip(),
+        }
+
+    def answer_project_question(
+        self,
+        question: str,
+        evidence: Sequence[Mapping[str, Any]],
+        history: Sequence[Mapping[str, Any]],
+    ) -> str:
+        safe_history = [
+            {
+                "role": str(item.get("role") or ""),
+                "content": str(item.get("content") or "")[:1200],
+            }
+            for item in history[-6:]
+            if isinstance(item, Mapping)
+        ]
+        from .knowledge_base import ProjectKnowledgeBase
+
+        answer_mode = ProjectKnowledgeBase.answer_mode(question)
+        payload = self.client.complete_json(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是当前工业皮带异物检测项目的知识问答助手。只能依据 repository_evidence "
+                        "回答，不得使用外部知识或猜测未提供的路径、参数、测试结果、运行状态和设备信息。"
+                        "不得根据文档声称监控当前在线、任务正在运行或当前有多少报警；这些动态问题必须由 Skill 查询。"
+                        "如果证据不足，明确回答资料中未说明。"
+                        "answer_mode为user时，面向普通工业现场操作人员：先直接回答，再给操作步骤，"
+                        "必要时给注意事项；不要写‘根据项目资料’，不要展示函数名、类名、数据库表名、"
+                        "字段名、接口路径、源码路径或混合粘贴英文原文，英文状态要改写成自然中文。"
+                        "answer_mode为developer时，才可以按问题需要展示代码位置、接口和实现细节。"
+                        "只返回 JSON 对象：{\"answer\":\"...\"}。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "question": question,
+                            "answer_mode": answer_mode,
+                            "conversation_context": safe_history,
+                            "repository_evidence": [dict(item) for item in evidence],
+                        },
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                },
+            ]
+        )
+        answer = payload.get("answer")
+        if not isinstance(answer, str) or not answer.strip():
+            raise LLMAPIError("大模型项目知识回答缺少 answer 文本")
+        return answer.strip()
+
 def create_llm_enabled_service(
     db_path: Path | str | None = None,
     *,
@@ -441,11 +660,15 @@ def create_llm_enabled_service(
     load_env_file(dotenv_path)
     client = OpenAICompatibleClient(LLMAPIConfig.from_env(), transport=transport)
     planner = OpenAICompatibleSkillPlanner(client)
+    explainer = OpenAICompatibleDetectionExplainer(client)
+    knowledge_answerer = OpenAICompatibleKnowledgeAnswerer(client)
     planner_mode = os.getenv("LLM_PLANNER_MODE", "hybrid")
     return create_default_service(
         db_path,
         skill_planner=planner,
         skill_planner_mode=planner_mode,
+        detection_explainer=explainer,
+        knowledge_answerer=knowledge_answerer,
     )
 
 

@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from task3_alarm.alarm_rule_engine import (
+    _event_time_text,
     apply_alarm_rules,
     render_alarm_report,
     write_alarm_outputs,
@@ -56,6 +57,35 @@ def make_image_document(
 
 
 class AlarmRuleEngineTests(unittest.TestCase):
+    def test_video_event_report_prefers_shanghai_real_time(self) -> None:
+        event = {
+            "start_video_time": "00:00:15.520",
+            "end_video_time": "00:00:16.250",
+            "start_real_time": "2026-07-21 09:38:15.520+00:00",
+            "end_real_time": "2026-07-21 09:38:16.250+00:00",
+        }
+
+        text = _event_time_text(event, "video")
+
+        self.assertEqual(
+            text,
+            (
+                "北京时间2026-07-21 17:38:15.520至2026-07-21 17:38:16.250"
+                "（片段内时间00:00:15.520至00:00:16.250）"
+            ),
+        )
+
+    def test_video_event_report_falls_back_to_relative_time(self) -> None:
+        text = _event_time_text(
+            {
+                "start_video_time": "00:00:05.000",
+                "end_video_time": "00:00:06.000",
+            },
+            "video",
+        )
+
+        self.assertEqual(text, "片段内时间00:00:05.000至00:00:06.000")
+
     def test_no_object_is_no_alarm(self) -> None:
         ruled = apply_alarm_rules(make_image_document([]))
 

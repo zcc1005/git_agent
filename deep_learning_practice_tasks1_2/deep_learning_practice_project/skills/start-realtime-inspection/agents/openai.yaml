@@ -1,0 +1,4 @@
+interface:
+  display_name: "启动持续实时巡检"
+  short_description: "建立有界RTSP持续连接并执行抽帧检测、事件聚合和报警入库"
+  default_prompt: "使用 $start-realtime-inspection 启动主监控两分钟持续实时巡检。"

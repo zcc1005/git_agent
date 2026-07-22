@@ -48,7 +48,7 @@ RISK_LEVEL_SCHEMA = {
 }
 SOURCE_TYPE_SCHEMA = {
     "type": "string",
-    "enum": ["image", "video"],
+    "enum": ["image", "video", "realtime"],
     "description": "媒体来源类型，必须输出 image 或 video。",
     "aliases": {"图片": "image", "图像": "image", "照片": "image", "视频": "video"},
 }
@@ -241,6 +241,16 @@ CONTROL_ALARM_SCHEMA = _object(
             "aliases": {"view": "query", "show": "query", "get": "query", "status": "query"},
         },
         "alarm_id": _string("可选的明确报警 ID。", max_length=128),
+        "scope": {
+            "type": "string",
+            "enum": ["single", "realtime_task"],
+            "default": "single",
+            "description": (
+                "single 只操作一个明确或最近报警；realtime_task 仅在用户明确要求"
+                "确认/取消本轮实时巡检全部报警时使用。"
+            ),
+        },
+        "task_id": _string("批量闭环所属的实时巡检任务 ID。", max_length=128),
         "line_id": deepcopy(LINE_ID_SCHEMA),
         "session_only": {
             "type": "boolean",
@@ -291,6 +301,45 @@ REVIEW_DETECTION_SCHEMA = _object(
         "note": _string("人工复核或闭环处置说明。", max_length=1000),
     },
     required=("action",),
+)
+
+EXPLAIN_DETECTION_RESULT_SCHEMA = _object(
+    {
+        "detection_id": _string(
+            "要解释的检测记录 ID；省略时只读取当前会话最近一次有效检测。",
+            max_length=128,
+        ),
+        "question": _string("用户围绕检测结果提出的原始问题。", max_length=1000),
+        "question_type": {
+            "type": "string",
+            "enum": [
+                "risk_reason",
+                "action_advice",
+                "similar_history",
+                "target_position",
+                "general",
+            ],
+            "default": "general",
+            "aliases": {
+                "为什么是高风险？": "risk_reason",
+                "风险原因": "risk_reason",
+                "有什么处置建议？": "action_advice",
+                "处置建议": "action_advice",
+                "查看同类历史": "similar_history",
+                "同类历史": "similar_history",
+                "解释目标位置": "target_position",
+                "目标位置": "target_position",
+            },
+            "description": "追问类型；风险、处置、同类历史和目标位置使用对应规范枚举。",
+        },
+        "history_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "查询同类历史时最多提供给解释器的记录数量。",
+        },
+    }
 )
 
 _inspection_parameter_properties = {
@@ -442,6 +491,63 @@ CONTROL_MONITORING_TASK_SCHEMA = _object(
     }
 )
 
+START_REALTIME_INSPECTION_SCHEMA = _object(
+    {
+        "source_id": deepcopy(PROBE_VIDEO_SOURCE_SCHEMA["properties"]["source_id"]),
+        "start_time": _datetime("实时巡检开始时间；必须带时区，省略表示立即开始。"),
+        "end_time": _datetime("实时巡检结束时间；必须带时区，与 run_duration_seconds 二选一。"),
+        "run_duration_seconds": {
+            "type": "number", "minimum": 1, "maximum": 86400,
+            "description": "从开始时间计算的有界运行秒数；与 end_time 二选一。",
+        },
+        "sample_fps": {
+            "type": "number", "minimum": 0.2, "maximum": 10, "default": 2.0,
+            "description": "持续连接期间每秒最多运行 YOLO 的抽样帧数；batch 固定为 1。",
+        },
+        "zone_id": deepcopy(DETECT_VIDEO_SOURCE_SCHEMA["properties"]["zone_id"]),
+        "parameters": deepcopy(DETECT_VIDEO_SOURCE_SCHEMA["properties"]["parameters"]),
+        "reconnect_interval_seconds": {
+            "type": "number", "minimum": 0.1, "maximum": 300, "default": 3.0,
+            "description": "RTSP 断流后的可中断重连等待秒数。",
+        },
+        "max_consecutive_failures": {
+            "type": "integer", "minimum": 1, "maximum": 100, "default": 3,
+            "description": "连续连接或读取失败达到此数后结束任务。",
+        },
+        "min_event_hits": {
+            "type": "integer", "minimum": 1, "maximum": 100, "default": 2,
+            "description": "同类同位置目标至少连续命中的抽样帧数。",
+        },
+        "event_silence_seconds": {
+            "type": "number", "minimum": 0.1, "maximum": 300, "default": 1.0,
+            "description": "超过该静默时间后结束并持久化聚合事件。",
+        },
+    },
+    required=("source_id",),
+)
+
+CONTROL_REALTIME_INSPECTION_SCHEMA = _object(
+    {
+        "action": {
+            "type": "string", "enum": ["query", "stop"], "default": "query",
+            "aliases": {"view": "query", "show": "query", "status": "query", "get": "query", "cancel": "stop"},
+            "description": "query 查看状态；只有用户明确要求停止时才可使用 stop。",
+        },
+        "task_id": _string("实时巡检任务 ID。", max_length=128),
+        "source_id": deepcopy(PROBE_VIDEO_SOURCE_SCHEMA["properties"]["source_id"]),
+        "event_id": _string("实时巡检事件 ID。", max_length=192),
+        "after_event_id": _string("只返回该事件之后新确认的事件。", max_length=192),
+        "latest": {"type": "boolean", "default": False,
+                   "description": "只返回最近一条已确认事件。"},
+        "active_only": {"type": "boolean", "default": False,
+                        "description": "只返回仍在持续的 active 事件。"},
+        "events_only": {"type": "boolean", "default": False,
+                        "description": "按事件查询语义返回结果。"},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10,
+                  "description": "查询返回的任务或聚合事件数量上限。"},
+    }
+)
+
 CONTROL_STREAM_ARCHIVE_SCHEMA = _object(
     {
         "action": {
@@ -511,12 +617,15 @@ ALL_SKILL_SCHEMAS = {
     "query-history": QUERY_HISTORY_SCHEMA,
     "generate-risk-report": GENERATE_RISK_REPORT_SCHEMA,
     "review-detection": REVIEW_DETECTION_SCHEMA,
+    "explain-detection-result": EXPLAIN_DETECTION_RESULT_SCHEMA,
     "run-inspection-task": RUN_INSPECTION_SCHEMA,
     "probe-video-source": PROBE_VIDEO_SOURCE_SCHEMA,
     "capture-video-source": CAPTURE_VIDEO_SOURCE_SCHEMA,
     "detect-video-source": DETECT_VIDEO_SOURCE_SCHEMA,
     "start-monitoring-task": START_MONITORING_TASK_SCHEMA,
     "control-monitoring-task": CONTROL_MONITORING_TASK_SCHEMA,
+    "start-realtime-inspection": START_REALTIME_INSPECTION_SCHEMA,
+    "control-realtime-inspection": CONTROL_REALTIME_INSPECTION_SCHEMA,
     "control-stream-archive": CONTROL_STREAM_ARCHIVE_SCHEMA,
     "detect-archived-video": DETECT_ARCHIVED_VIDEO_SCHEMA,
 }

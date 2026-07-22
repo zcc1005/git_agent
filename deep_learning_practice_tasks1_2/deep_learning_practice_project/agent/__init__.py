@@ -2,6 +2,7 @@
 
 from .intents import Intent, IntentMatch, RuleBasedIntentRecognizer
 from .integrations import existing_web_alarm_control
+from .knowledge_base import KnowledgeAnswerer, KnowledgeHit, ProjectKnowledgeBase
 from .recognizers import (
     HybridIntentRecognizer,
     IntentRecognizer,
@@ -42,6 +43,9 @@ __all__ = [
     "ArchiveRangeResult",
     "HistoricalStreamArchiveManager",
     "existing_web_alarm_control",
+    "KnowledgeAnswerer",
+    "KnowledgeHit",
+    "ProjectKnowledgeBase",
     "RuntimeSkill",
     "SkillRegistry",
     "SkillResult",

@@ -6,9 +6,20 @@ function createMessage(role, text, isError = false, attachment = null) {
   if (attachment?.src) article.classList.add("agent-chat__message--media");
 
   if (text) {
+    const normalizedText = String(text);
+    const referenceMatch = normalizedText.match(/(?:^|\n\n)(参考：[^\n]+)\s*$/);
+    const bodyText = referenceMatch
+      ? normalizedText.slice(0, referenceMatch.index).trim()
+      : normalizedText;
     const content = document.createElement("p");
-    content.textContent = text;
+    content.textContent = bodyText;
     article.append(content);
+    if (referenceMatch) {
+      const reference = document.createElement("small");
+      reference.className = "agent-chat__knowledge-reference";
+      reference.textContent = referenceMatch[1];
+      article.append(reference);
+    }
   }
   if (attachment?.src) {
     const preview = document.createElement("div");
@@ -85,18 +96,74 @@ function extractAlarmReport(data) {
   return null;
 }
 
+function extractDetectionPresentation(data) {
+  if (!data || typeof data !== "object") return null;
+  if (data.structured_alert?.detection_id) {
+    return {
+      alert: data.structured_alert,
+      analysis: String(data.ai_analysis || "").trim(),
+      analysisSource: String(data.analysis_source || ""),
+      quickQuestions: Array.isArray(data.quick_questions) ? data.quick_questions : [],
+    };
+  }
+  if (Array.isArray(data.steps)) {
+    for (let index = data.steps.length - 1; index >= 0; index -= 1) {
+      const nested = extractDetectionPresentation(data.steps[index]?.data);
+      if (nested) return nested;
+    }
+  }
+  if (Array.isArray(data.segment_results)) {
+    for (let index = data.segment_results.length - 1; index >= 0; index -= 1) {
+      const nested = extractDetectionPresentation(data.segment_results[index]?.data);
+      if (nested) return nested;
+    }
+  }
+  if (data.data && typeof data.data === "object") {
+    return extractDetectionPresentation(data.data);
+  }
+  return null;
+}
+
+function extractRealtimeReport(data) {
+  if (!data || typeof data !== "object") return null;
+  if (data.realtime_report?.task_id) return data.realtime_report;
+  if (Array.isArray(data.steps)) {
+    for (let index = data.steps.length - 1; index >= 0; index -= 1) {
+      const nested = extractRealtimeReport(data.steps[index]?.data);
+      if (nested) return nested;
+    }
+  }
+  if (data.data && typeof data.data === "object") {
+    return extractRealtimeReport(data.data);
+  }
+  return null;
+}
+
+function findDetectionId(data) {
+  const presentation = extractDetectionPresentation(data);
+  if (presentation?.alert?.detection_id) return String(presentation.alert.detection_id);
+  if (!data || typeof data !== "object") return "";
+  if (data.detection_id) return String(data.detection_id);
+  for (const value of Object.values(data)) {
+    if (!value || typeof value !== "object") continue;
+    const nested = findDetectionId(value);
+    if (nested) return nested;
+  }
+  return "";
+}
+
 function displayAlarmReportText(text) {
   let report = String(text || "").trim();
   const conclusionIndex = report.indexOf("二、报警结论");
   if (conclusionIndex >= 0) report = report.slice(conclusionIndex);
-  const generationIndex = report.indexOf("\n七、生成信息");
-  if (generationIndex >= 0) report = report.slice(0, generationIndex);
+  const hiddenSections = ["\n五、风险说明", "\n六、处理建议", "\n七、生成信息"]
+    .map((heading) => report.indexOf(heading))
+    .filter((index) => index >= 0);
+  if (hiddenSections.length) report = report.slice(0, Math.min(...hiddenSections));
   const sectionNumbers = [
     ["二、报警结论", "一、报警结论"],
     ["三、总体风险等级", "二、总体风险等级"],
     ["四、事件详情", "三、事件详情"],
-    ["五、风险说明", "四、风险说明"],
-    ["六、处理建议", "五、处理建议"],
   ];
   sectionNumbers.forEach(([original, displayed]) => {
     report = report.replace(original, displayed);
@@ -119,14 +186,13 @@ function appendReportContent(container, report) {
     eventFrames.map((item) => [Number(item.event_id), String(item.key_frame || "")]),
   );
   const detailStart = text.indexOf("三、事件详情");
-  const riskStart = text.indexOf("\n四、风险说明", detailStart);
-  if (frameByEvent.size === 0 || detailStart < 0 || riskStart < 0) {
+  if (frameByEvent.size === 0 || detailStart < 0) {
     appendReportText(container, text);
     return;
   }
 
   appendReportText(container, text.slice(0, detailStart));
-  const detailText = text.slice(detailStart, riskStart);
+  const detailText = text.slice(detailStart);
   detailText.split(/(?=^事件\d+：)/gm).forEach((block) => {
     appendReportText(container, block);
     const eventMatch = block.match(/^事件(\d+)：/m);
@@ -145,7 +211,255 @@ function appendReportContent(container, report) {
     figure.append(image, caption);
     container.append(figure);
   });
-  appendReportText(container, text.slice(riskStart));
+}
+
+function appendDetectionPresentation(article, presentation) {
+  if (!article || !presentation?.alert?.detection_id) return;
+  const alert = presentation.alert;
+  article.classList.add("agent-chat__message--with-report");
+  const panel = document.createElement("section");
+  panel.className = "agent-chat__structured-alert";
+  const title = document.createElement("h3");
+  title.textContent = "结构化预警结果";
+  const grid = document.createElement("dl");
+  const classes = Object.entries(alert.class_counts || {})
+    .map(([name, count]) => `${name}${count}个`).join("、") || "无确认异物";
+  const confidence = alert.max_confidence == null
+    ? "—"
+    : Number(alert.max_confidence).toFixed(4);
+  const fields = [
+    ["监控源", alert.monitor_source || "未知"],
+    ["时间", alert.detected_at || "未知"],
+    ["异物类别", classes],
+    ["数量", String(alert.object_count ?? 0)],
+    ["最高置信度", confidence],
+    ["风险等级", alert.risk_level_name || alert.risk_level || "未知"],
+    ["检测编号", alert.detection_id],
+    ["报警状态", alert.alarm_status_name || alert.alarm_status || "未知"],
+  ];
+  fields.forEach(([label, value]) => {
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = String(value);
+    grid.append(term, description);
+  });
+  panel.append(title, grid);
+
+  const frames = Array.isArray(alert.representative_frames)
+    ? alert.representative_frames
+    : [];
+  frames.forEach((item, index) => {
+    const keyFrame = String(item?.key_frame || item?.image_path || "");
+    if (!keyFrame) return;
+    const eventId = Number(item?.event_id || index + 1);
+    const figure = document.createElement("figure");
+    figure.className = "agent-chat__event-frame";
+    const image = document.createElement("img");
+    image.src = outputPathToUrl(keyFrame);
+    image.alt = `事件${eventId}代表检测帧`;
+    image.loading = "lazy";
+    image.addEventListener("error", () => figure.remove(), { once: true });
+    const caption = document.createElement("figcaption");
+    caption.textContent = `事件${eventId}代表检测帧`;
+    figure.append(image, caption);
+    panel.append(figure);
+  });
+
+  if (presentation.analysis) {
+    const analysis = document.createElement("section");
+    analysis.className = "agent-chat__ai-analysis";
+    const heading = document.createElement("h3");
+    heading.textContent = "AI 智能简析";
+    const text = document.createElement("p");
+    text.textContent = presentation.analysis;
+    analysis.append(heading, text);
+    panel.append(analysis);
+  }
+  article.append(panel);
+}
+
+function appendRealtimeReport(article, report) {
+  if (!article || !report?.task_id) return;
+  article.classList.add("agent-chat__message--with-report");
+  const panel = document.createElement("section");
+  panel.className = "agent-chat__structured-alert agent-chat__realtime-report";
+  const title = document.createElement("h3");
+  title.textContent = "实时巡检预警结果";
+  const grid = document.createElement("dl");
+  const classes = Object.entries(report.class_counts || {})
+    .map(([name, count]) => `${name}${count}个`).join("、") || "无确认异物";
+  const confidence = report.max_confidence == null
+    ? "—"
+    : Number(report.max_confidence).toFixed(4);
+  const fields = [
+    ["监控源", report.monitor_source || "未知"],
+    ["巡检时间", `${report.start_time || "未知"} 至 ${report.end_time || "未知"}`],
+    ["异物类别", classes],
+    ["事件数量", String(report.event_count ?? 0)],
+    ["报警数量", String(report.alarm_count ?? 0)],
+    ["最高置信度", confidence],
+    ["总体风险", report.risk_level_name || report.risk_level || "未知"],
+  ];
+  fields.forEach(([label, value]) => {
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = String(value);
+    grid.append(term, description);
+  });
+  panel.append(title, grid);
+
+  const events = Array.isArray(report.events) ? report.events : [];
+  if (!events.length) {
+    const empty = document.createElement("p");
+    empty.className = "agent-chat__realtime-empty";
+    empty.textContent = "本轮实时巡检未发现确认异物，因此没有触发报警事件。";
+    panel.append(empty);
+  }
+  events.forEach((event, index) => {
+    const section = document.createElement("section");
+    section.className = "agent-chat__realtime-event";
+    const heading = document.createElement("h4");
+    heading.textContent = `事件${event.event_number || index + 1}`;
+    const details = document.createElement("dl");
+    const eventConfidence = event.confidence == null
+      ? "—"
+      : Number(event.confidence).toFixed(4);
+    [
+      ["出现时间", event.detected_at || "未知"],
+      ["异物类别", event.class_name || "未知异物"],
+      ["置信度", eventConfidence],
+      ["目标位置", event.position || "未知区域"],
+      ["风险等级", event.risk_level_name || event.risk_level || "未知"],
+      ["检测编号", event.detection_id || "—"],
+      ["报警状态", event.alarm_status_name || event.alarm_status || "未知"],
+    ].forEach(([label, value]) => {
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const description = document.createElement("dd");
+      description.textContent = String(value);
+      details.append(term, description);
+    });
+    section.append(heading, details);
+    const imagePath = String(event.image_path || "");
+    if (imagePath) {
+      const figure = document.createElement("figure");
+      figure.className = "agent-chat__event-frame";
+      const image = document.createElement("img");
+      image.src = outputPathToUrl(imagePath);
+      image.alt = `事件${event.event_number || index + 1}代表检测帧`;
+      image.loading = "lazy";
+      image.addEventListener("error", () => figure.remove(), { once: true });
+      const caption = document.createElement("figcaption");
+      caption.textContent = `事件${event.event_number || index + 1}代表检测帧`;
+      figure.append(image, caption);
+      section.append(figure);
+    }
+    panel.append(section);
+  });
+
+  const alarmStatuses = report.alarm_status_counts || {};
+  const pendingCount = Number(alarmStatuses.pending || 0);
+  const closure = document.createElement("section");
+  closure.className = "agent-chat__alarm-closure";
+  const closureText = document.createElement("p");
+  if (pendingCount > 0) {
+    closureText.textContent = `本轮还有${pendingCount}条报警待确认，是否确认报警？`;
+    const actions = document.createElement("div");
+    actions.className = "agent-chat__alarm-actions";
+    [
+      ["confirm", "确认本轮报警"],
+      ["cancel", "取消本轮报警"],
+    ].forEach(([action, label]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.agentAlarmAction = action;
+      button.dataset.taskId = String(report.task_id);
+      button.textContent = label;
+      actions.append(button);
+    });
+    closure.append(closureText, actions);
+  } else if (Number(alarmStatuses.confirmed || 0) > 0) {
+    closureText.textContent = `本轮报警已闭环：已确认${Number(alarmStatuses.confirmed)}条。`;
+    closure.append(closureText);
+  } else if (Number(alarmStatuses.cancelled || 0) > 0) {
+    closureText.textContent = `本轮报警已闭环：已取消${Number(alarmStatuses.cancelled)}条。`;
+    closure.append(closureText);
+  }
+  if (closure.childNodes.length) panel.append(closure);
+
+  if (report.ai_analysis) {
+    const analysis = document.createElement("section");
+    analysis.className = "agent-chat__ai-analysis";
+    const heading = document.createElement("h3");
+    heading.textContent = "AI 智能简析";
+    const text = document.createElement("p");
+    text.textContent = report.ai_analysis;
+    analysis.append(heading, text);
+    panel.append(analysis);
+  }
+  article.append(panel);
+}
+
+function realtimeEventKey(event) {
+  return `${String(event?.task_id || "")}::${String(event?.event_id || "")}`;
+}
+
+function appendRealtimeEvent(article, event) {
+  if (!article || !event?.event_id || !event?.task_id) return;
+  article.classList.add("agent-chat__message--with-report");
+  article.dataset.realtimeEventKey = realtimeEventKey(event);
+  const panel = document.createElement("section");
+  panel.className = "agent-chat__structured-alert agent-chat__realtime-live-event";
+  const title = document.createElement("h3");
+  title.textContent = "【实时异物预警】";
+  const grid = document.createElement("dl");
+  const classCounts = Object.entries(event.class_counts || {});
+  const quantity = classCounts.reduce((sum, [, count]) => sum + Number(count || 0), 0) || 1;
+  const confidence = Number(event.max_confidence ?? event.confidence);
+  [
+    ["发现时间", event.detected_at || "未知"],
+    ["异物类别", event.class_name || "未知异物"],
+    ["数量", String(quantity)],
+    ["最高置信度", Number.isFinite(confidence) ? confidence.toFixed(4) : "—"],
+    ["风险等级", event.risk_level_name || event.risk_level || "未知"],
+    ["报警状态", event.alarm_status_name || event.alarm_status || "未知"],
+    ["事件状态", event.event_status === "closed" ? "已关闭" : "持续中"],
+  ].forEach(([label, value]) => {
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = String(value);
+    if (label === "事件状态") description.dataset.realtimeEventStatus = "";
+    grid.append(term, description);
+  });
+  panel.append(title, grid);
+  const imagePath = String(event.representative_frame || event.image_path || "");
+  if (imagePath) {
+    const figure = document.createElement("figure");
+    figure.className = "agent-chat__event-frame";
+    const image = document.createElement("img");
+    image.src = outputPathToUrl(imagePath);
+    image.alt = "实时异物事件代表帧";
+    image.loading = "lazy";
+    image.addEventListener("error", () => figure.remove(), { once: true });
+    const caption = document.createElement("figcaption");
+    caption.textContent = "代表帧";
+    figure.append(image, caption);
+    panel.append(figure);
+  }
+  if (event.llm_summary) {
+    const analysis = document.createElement("section");
+    analysis.className = "agent-chat__ai-analysis";
+    const heading = document.createElement("h3");
+    heading.textContent = "AI 智能简析";
+    const text = document.createElement("p");
+    text.textContent = String(event.llm_summary);
+    analysis.append(heading, text);
+    panel.append(analysis);
+  }
+  article.append(panel);
 }
 
 function newSessionId() {
@@ -154,6 +468,7 @@ function newSessionId() {
 }
 
 const TERMINAL_MONITORING_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const TERMINAL_REALTIME_STATUSES = new Set(["completed", "stopped", "failed", "interrupted"]);
 
 function findMonitoringTaskId(value) {
   if (!value || typeof value !== "object") return "";
@@ -168,6 +483,40 @@ function findMonitoringTaskId(value) {
     return findMonitoringTaskId(value.data);
   }
   return "";
+}
+
+function findRealtimeTaskId(value) {
+  if (!value || typeof value !== "object") return "";
+  if (value.skill_name === "start-realtime-inspection" && value.data?.task_id) return String(value.data.task_id);
+  if (Array.isArray(value.steps)) {
+    for (let index = value.steps.length - 1; index >= 0; index -= 1) {
+      const nested = findRealtimeTaskId(value.steps[index]);
+      if (nested) return nested;
+    }
+  }
+  if (value.data && typeof value.data === "object") return findRealtimeTaskId(value.data);
+  return "";
+}
+
+function findRealtimeTask(value) {
+  if (!value || typeof value !== "object") return null;
+  if (value.task_id && value.status && value.source_id) return value;
+  if (value.task && typeof value.task === "object") {
+    const nestedTask = findRealtimeTask(value.task);
+    if (nestedTask) return nestedTask;
+  }
+  if (Array.isArray(value.steps)) {
+    for (let index = value.steps.length - 1; index >= 0; index -= 1) {
+      const nested = findRealtimeTask(value.steps[index]);
+      if (nested) return nested;
+    }
+  }
+  if (Array.isArray(value.tasks) && value.tasks.length) {
+    const active = value.tasks.find((item) => item && !TERMINAL_REALTIME_STATUSES.has(String(item.status || "")));
+    return findRealtimeTask(active || value.tasks[0]);
+  }
+  if (value.data && typeof value.data === "object") return findRealtimeTask(value.data);
+  return null;
 }
 
 function monitoringPathLabel(path) {
@@ -197,6 +546,8 @@ export function mountAgentChat(root) {
     || "/api/agent/monitoring/stop";
   const monitoringEventsEndpoint = root.dataset.monitoringEventsEndpoint
     || "/api/agent/monitoring/events";
+  const realtimeStatusEndpoint = root.dataset.realtimeStatusEndpoint || "/api/agent/realtime-inspection/status";
+  const realtimeEventsEndpoint = root.dataset.realtimeEventsEndpoint || "/api/agent/realtime-inspection/events";
   const storageKey = "foreign-object-agent-session";
   let sessionId = localStorage.getItem(storageKey);
   if (!sessionId) {
@@ -209,6 +560,21 @@ export function mountAgentChat(root) {
   let monitoringTimer = 0;
   let monitoringPolling = false;
   let lastMonitoringAlarmId = "";
+  const realtimeTaskStorageKey = `${storageKey}:realtime-task:${sessionId}`;
+  const realtimeReportStorageKey = `${storageKey}:realtime-report:${sessionId}`;
+  let realtimeTaskId = localStorage.getItem(realtimeTaskStorageKey) || "";
+  let realtimeReportAnnouncedTaskId = localStorage.getItem(realtimeReportStorageKey) || "";
+  let realtimeTimer = 0;
+  let realtimePolling = false;
+  let realtimeEventTimer = 0;
+  let realtimeEventPolling = false;
+  let realtimeEventCursor = "";
+  let displayedRealtimeEvents = new Set();
+  let latestDetectionId = "";
+
+  function setLatestDetectionId(detectionId) {
+    latestDetectionId = String(detectionId || "").trim();
+  }
 
   function append(role, text, isError = false, attachment = null) {
     const article = createMessage(role, text, isError, attachment);
@@ -350,6 +716,144 @@ export function mountAgentChat(root) {
     scheduleMonitoringPoll(0);
   }
 
+  function renderRealtime(task, events = []) {
+    if (!task?.task_id) return;
+    events.forEach((event) => {
+      const key = realtimeEventKey(event);
+      messages.querySelectorAll("[data-realtime-event-key]").forEach((article) => {
+        if (article.dataset.realtimeEventKey !== key) return;
+        const statusNode = article.querySelector("[data-realtime-event-status]");
+        if (statusNode) statusNode.textContent = event.event_status === "closed" ? "已关闭" : "持续中";
+      });
+    });
+    document.dispatchEvent(new CustomEvent("agent:realtime-status", {
+      detail: { task, events },
+    }));
+  }
+
+  function realtimeEventStorage(taskId) {
+    return {
+      cursor: `${storageKey}:realtime-event-cursor:${sessionId}:${taskId}`,
+      seen: `${storageKey}:realtime-events-seen:${sessionId}:${taskId}`,
+    };
+  }
+
+  function loadRealtimeEventState(taskId) {
+    const keys = realtimeEventStorage(taskId);
+    realtimeEventCursor = localStorage.getItem(keys.cursor) || "";
+    try {
+      const values = JSON.parse(localStorage.getItem(keys.seen) || "[]");
+      displayedRealtimeEvents = new Set(Array.isArray(values) ? values.map(String) : []);
+    } catch (_error) {
+      displayedRealtimeEvents = new Set();
+    }
+  }
+
+  function saveRealtimeEventState(taskId) {
+    const keys = realtimeEventStorage(taskId);
+    if (realtimeEventCursor) localStorage.setItem(keys.cursor, realtimeEventCursor);
+    localStorage.setItem(keys.seen, JSON.stringify(Array.from(displayedRealtimeEvents).slice(-200)));
+  }
+
+  function scheduleRealtimeEventPoll(delay = 3000) {
+    window.clearTimeout(realtimeEventTimer);
+    realtimeEventTimer = window.setTimeout(() => pollRealtimeEvents(), delay);
+  }
+
+  async function pollRealtimeEvents(initial = false, explicitTaskId = "") {
+    if (realtimeEventPolling) return;
+    const taskId = String(explicitTaskId || realtimeTaskId || "");
+    if (!taskId) return;
+    realtimeEventPolling = true;
+    try {
+      const url = new URL(realtimeEventsEndpoint, window.location.origin);
+      url.searchParams.set("session_id", sessionId);
+      url.searchParams.set("task_id", taskId);
+      url.searchParams.set("limit", "50");
+      if (realtimeEventCursor) url.searchParams.set("after_event_id", realtimeEventCursor);
+      const response = await fetch(url);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) return;
+      const events = Array.isArray(result.data?.events) ? result.data.events : [];
+      const task = result.data?.task || {};
+      events.forEach((event) => {
+        const key = realtimeEventKey(event);
+        if (!displayedRealtimeEvents.has(key)) {
+          const article = append("assistant", "检测到新的实时异物事件。", false);
+          appendRealtimeEvent(article, event);
+          displayedRealtimeEvents.add(key);
+          if (event.detection_id) setLatestDetectionId(event.detection_id);
+          document.dispatchEvent(new CustomEvent("agent:realtime-event", {
+            detail: { event, task },
+          }));
+        }
+        realtimeEventCursor = String(event.event_id || realtimeEventCursor);
+      });
+      if (result.data?.next_event_id) {
+        realtimeEventCursor = String(result.data.next_event_id);
+      }
+      saveRealtimeEventState(taskId);
+      if (task && !TERMINAL_REALTIME_STATUSES.has(String(task.status || ""))) {
+        scheduleRealtimeEventPoll(initial ? 1000 : 3000);
+      }
+    } catch (_error) {
+      if (realtimeTaskId) scheduleRealtimeEventPoll(5000);
+    } finally {
+      realtimeEventPolling = false;
+    }
+  }
+
+  async function pollRealtime(initial = false) {
+    if (realtimePolling) {
+      window.clearTimeout(realtimeTimer);
+      realtimeTimer = window.setTimeout(() => pollRealtime(initial), 250);
+      return;
+    }
+    realtimePolling = true;
+    try {
+      const requestedTaskId = realtimeTaskId;
+      const url = new URL(realtimeStatusEndpoint, window.location.origin);
+      url.searchParams.set("session_id", sessionId);
+      if (realtimeTaskId) url.searchParams.set("task_id", realtimeTaskId);
+      const response = await fetch(url);
+      const result = await response.json().catch(() => ({}));
+      const task = result.data?.task || result.data?.tasks?.[0];
+      if (response.ok && result.ok && task) {
+        realtimeTaskId = String(task.task_id);
+        localStorage.setItem(realtimeTaskStorageKey, realtimeTaskId);
+        renderRealtime(task, result.data?.events || []);
+        if (!TERMINAL_REALTIME_STATUSES.has(String(task.status || ""))) {
+          realtimeTimer = window.setTimeout(() => pollRealtime(), 3000);
+        } else {
+          await pollRealtimeEvents(false, String(task.task_id));
+          window.clearTimeout(realtimeEventTimer);
+          localStorage.removeItem(realtimeTaskStorageKey);
+          if (requestedTaskId && realtimeReportAnnouncedTaskId !== String(task.task_id)) {
+            append("assistant", result.reply || "实时巡检已结束。", false);
+            realtimeReportAnnouncedTaskId = String(task.task_id);
+            localStorage.setItem(realtimeReportStorageKey, realtimeReportAnnouncedTaskId);
+          }
+        }
+      }
+    } catch (_error) {
+      realtimeTimer = window.setTimeout(() => pollRealtime(), 5000);
+    } finally { realtimePolling = false; }
+  }
+
+  function activateRealtime(taskId, task = null) {
+    realtimeTaskId = taskId;
+    loadRealtimeEventState(taskId);
+    localStorage.setItem(realtimeTaskStorageKey, taskId);
+    window.clearTimeout(realtimeTimer);
+    if (task) renderRealtime(task);
+    if (task && TERMINAL_REALTIME_STATUSES.has(String(task.status || ""))) {
+      localStorage.removeItem(realtimeTaskStorageKey);
+      return;
+    }
+    realtimeTimer = window.setTimeout(() => pollRealtime(), 0);
+    scheduleRealtimeEventPoll(0);
+  }
+
   async function stopMonitoring() {
     if (!monitoringTaskId || monitoringStop.disabled) return;
     monitoringStop.disabled = true;
@@ -400,7 +904,17 @@ export function mountAgentChat(root) {
         }
         const article = append(role, content, false, attachment);
         if (role === "assistant") {
-          appendAlarmReport(article, extractAlarmReport(item.metadata?.data));
+          const realtimeReport = extractRealtimeReport(item.metadata?.data);
+          const presentation = extractDetectionPresentation(item.metadata?.data);
+          if (realtimeReport) {
+            appendRealtimeReport(article, realtimeReport);
+          } else if (presentation) {
+            appendDetectionPresentation(article, presentation);
+          } else {
+            appendAlarmReport(article, extractAlarmReport(item.metadata?.data));
+          }
+          const detectionId = findDetectionId(item.metadata?.data);
+          if (detectionId) setLatestDetectionId(detectionId);
         }
       });
     } catch (_error) {
@@ -421,7 +935,9 @@ export function mountAgentChat(root) {
       src: URL.createObjectURL(media),
     } : null;
     const userArticle = append("user", message, false, attachment);
-    const monitoringStartRequested = Boolean(message) && (
+    const realtimeStartRequested = Boolean(message) && /(?:开始|启动|开启|安排|从现在开始|从.+开始).{0,30}(?:实时巡检|持续巡检|持续实时|持续连接检测)/.test(message);
+    const realtimeControlRequested = Boolean(message) && /(?:查看|查询|显示|停止|终止|结束|取消).{0,24}(?:实时巡检|持续巡检)|(?:实时巡检|持续巡检).{0,24}(?:状态|停止|终止|结束|取消)/.test(message);
+    const monitoringStartRequested = !realtimeStartRequested && Boolean(message) && (
       /(?:开始|启动|开启|创建|安排|预约).{0,16}(?:监控|巡检)/.test(message)
       || /(?:立即|现在)(?:开始)?(?:监控|巡检)/.test(message)
       || /(?:监控|巡检).*(?:从|到|至|持续|分钟|小时|今天|明天)/.test(message)
@@ -437,7 +953,11 @@ export function mountAgentChat(root) {
         && /(?:图片|图像|照片|视频|这张|这段|这个|监控|摄像头|视频流|实时流|RTSP|monitor)/i.test(message)
       )
     );
-    const pendingText = monitoringStartRequested
+    const pendingText = realtimeStartRequested
+      ? "正在启动实时巡检..."
+      : realtimeControlRequested
+        ? "正在处理实时巡检任务..."
+      : monitoringStartRequested
       ? "正在创建监控任务..."
       : monitoringControlRequested
         ? "正在处理监控任务..."
@@ -451,6 +971,8 @@ export function mountAgentChat(root) {
     const body = new FormData();
     body.append("message", message);
     body.append("session_id", sessionId);
+    if (latestDetectionId) body.append("detection_id", latestDetectionId);
+    if (realtimeTaskId) body.append("task_id", realtimeTaskId);
     if (media) body.append("media", media);
     textarea.value = "";
     textarea.style.height = "auto";
@@ -471,9 +993,24 @@ export function mountAgentChat(root) {
         data.reply || "操作已完成。",
         !data.ok,
       );
-      appendAlarmReport(assistantArticle, extractAlarmReport(data.data));
+      const realtimeReport = extractRealtimeReport(data.data);
+      const presentation = extractDetectionPresentation(data.data);
+      if (realtimeReport) {
+        appendRealtimeReport(assistantArticle, realtimeReport);
+        realtimeReportAnnouncedTaskId = String(realtimeReport.task_id);
+        localStorage.setItem(realtimeReportStorageKey, realtimeReportAnnouncedTaskId);
+      } else if (presentation) {
+        appendDetectionPresentation(assistantArticle, presentation);
+      } else {
+        appendAlarmReport(assistantArticle, extractAlarmReport(data.data));
+      }
+      const detectionId = findDetectionId(data.data);
+      if (detectionId) setLatestDetectionId(detectionId);
       const monitoringId = findMonitoringTaskId(data);
       if (monitoringId) activateMonitoring(monitoringId);
+      const realtimeTask = findRealtimeTask(data);
+      const realtimeId = String(realtimeTask?.task_id || findRealtimeTaskId(data) || "");
+      if (realtimeId) activateRealtime(realtimeId, realtimeTask);
       document.dispatchEvent(new CustomEvent("agent:response", { detail: { data } }));
       if (data.attachment_received) {
         mediaInput.value = "";
@@ -515,11 +1052,19 @@ export function mountAgentChat(root) {
 
   monitoringStop?.addEventListener("click", stopMonitoring);
 
-  root.querySelectorAll("[data-agent-prompt]").forEach((button) => {
-    button.addEventListener("click", () => {
-      textarea.value = button.dataset.agentPrompt || "";
-      textarea.focus();
-    });
+  root.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-agent-alarm-action]");
+    if (!button || !root.contains(button)) return;
+    const action = button.dataset.agentAlarmAction;
+    const taskId = String(button.dataset.taskId || "");
+    if (!taskId || !["confirm", "cancel"].includes(action)) return;
+    realtimeTaskId = taskId;
+    const prompt = action === "confirm" ? "确认本轮报警" : "取消本轮报警";
+    button.closest(".agent-chat__alarm-actions")?.querySelectorAll("button")
+      .forEach((item) => { item.disabled = true; });
+    textarea.value = prompt;
+    textarea.dispatchEvent(new Event("input"));
+    form.requestSubmit();
   });
 
   document.addEventListener("agent:prefill", (event) => {
@@ -530,8 +1075,13 @@ export function mountAgentChat(root) {
     textarea.focus();
   });
 
+  if (realtimeTaskId) {
+    loadRealtimeEventState(realtimeTaskId);
+    scheduleRealtimeEventPoll(0);
+  }
   loadHistory();
   pollMonitoring(true);
+  pollRealtime(true);
 }
 
 document.querySelectorAll("[data-agent-chat]").forEach(mountAgentChat);

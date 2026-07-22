@@ -8,6 +8,9 @@
   data-monitoring-stop-endpoint="/api/agent/monitoring/stop"
   data-monitoring-status-endpoint="/api/agent/monitoring/status"
   data-monitoring-events-endpoint="/api/agent/monitoring/events"
+  data-realtime-stop-endpoint="/api/agent/realtime-inspection/stop"
+  data-realtime-status-endpoint="/api/agent/realtime-inspection/status"
+  data-realtime-events-endpoint="/api/agent/realtime-inspection/events"
   aria-labelledby="agentChatTitle"
 >
   <header class="agent-chat__header">
@@ -39,14 +42,6 @@
     <article class="agent-chat__message agent-chat__message--assistant" aria-label="智能体消息">
       <p>我已待命。你可以上传现场图片或视频，也可以直接查询风险、报告和历史记录。</p>
     </article>
-  </div>
-
-  <div class="agent-chat__quick-actions" aria-label="快捷指令">
-    <button type="button" data-agent-prompt="检测这张图片">检测这张图片</button>
-    <button type="button" data-agent-prompt="检测这段视频">检测这段视频</button>
-    <button type="button" data-agent-prompt="查询上一轮结果">上一轮结果</button>
-    <button type="button" data-agent-prompt="今天有几次高风险报警">今日高风险</button>
-    <button type="button" data-agent-prompt="生成今日风险报告">今日风险报告</button>
   </div>
 
   <form class="agent-chat__composer" data-agent-form>

@@ -42,6 +42,13 @@ VALID_STREAM_ARCHIVE_STATUSES = {
     "failed",
 }
 VALID_STREAM_ARCHIVE_SEGMENT_STATUSES = {"recording", "ready", "failed", "deleted"}
+VALID_REALTIME_INSPECTION_STATUSES = {
+    "scheduled", "connecting", "running", "reconnecting", "stop_requested",
+    "completed", "stopped", "failed", "interrupted",
+}
+ACTIVE_REALTIME_INSPECTION_STATUSES = (
+    "scheduled", "connecting", "running", "reconnecting", "stop_requested",
+)
 MONITORING_TASK_TO_JOB_STATUS = {
     "scheduled": "pending",
     "running": "running",
@@ -70,7 +77,8 @@ def _normalized_utc_time(value: str | datetime, label: str) -> str:
         raise ValueError(f"{label} 必须是 ISO 8601 时间") from exc
     if parsed.tzinfo is None:
         raise ValueError(f"{label} 必须包含时区")
-    return parsed.astimezone(timezone.utc).isoformat(timespec="seconds")
+    # Preserve sub-second precision for short bounded background tasks and tests.
+    return parsed.astimezone(timezone.utc).isoformat()
 
 
 @dataclass(frozen=True)
@@ -300,6 +308,87 @@ class StreamArchiveSegmentRecord:
         }
 
 
+@dataclass(frozen=True)
+class RealtimeInspectionTaskRecord:
+    id: str
+    session_id: str
+    source_id: str
+    line_id: str
+    zone_id: str
+    start_time: str
+    end_time: str
+    status: str
+    sample_fps: float
+    created_at: str
+    updated_at: str
+    started_at: str
+    stopped_at: str
+    frames_read: int
+    frames_inferred: int
+    frames_dropped: int
+    inference_failures: int
+    reconnect_count: int
+    events_detected: int
+    alarms_created: int
+    highest_risk_level: str
+    last_frame_at: str
+    last_inference_at: str
+    latest_detection_id: str
+    latest_alarm_id: str
+    latest_event_frame: str
+    last_error_code: str
+    last_error_message: str
+    config: Dict[str, Any]
+
+    def to_dict(self) -> Dict[str, Any]:
+        values = dict(self.__dict__)
+        values["task_id"] = values.pop("id")
+        started = self.started_at or self.start_time
+        try:
+            start = datetime.fromisoformat(started.replace("Z", "+00:00"))
+            finish_text = self.stopped_at or self.updated_at
+            finish = datetime.fromisoformat(finish_text.replace("Z", "+00:00"))
+            values["elapsed_seconds"] = round(max(0.0, (finish - start).total_seconds()), 3)
+        except (TypeError, ValueError):
+            values["elapsed_seconds"] = 0.0
+        elapsed = float(values["elapsed_seconds"])
+        values["inference_fps"] = round(self.frames_inferred / elapsed, 3) if elapsed else 0.0
+        return values
+
+
+@dataclass(frozen=True)
+class RealtimeInspectionEventRecord:
+    event_id: str
+    task_id: str
+    source_id: str
+    detected_at: str
+    ended_at: str
+    class_name: str
+    confidence: float
+    bbox: List[float]
+    risk_level: str
+    detection_id: str
+    alarm_id: str
+    image_path: str
+    metadata: Dict[str, Any]
+    created_at: str
+    line_id: str
+    last_seen_at: str
+    event_status: str
+    hit_count: int
+    class_counts: Dict[str, int]
+    max_confidence: float
+    alarm_report: str
+    llm_summary: str
+    updated_at: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        values = dict(self.__dict__)
+        values["representative_frame"] = self.image_path
+        values["confidence"] = self.confidence
+        return values
+
+
 class SQLiteHistoryStore:
     """Small SQLite repository used by the agent and future Web API.
 
@@ -519,6 +608,68 @@ class SQLiteHistoryStore:
                     UNIQUE(source_id, started_at, ended_at)
                 );
 
+                CREATE TABLE IF NOT EXISTS realtime_inspection_tasks (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL,
+                    line_id TEXT NOT NULL DEFAULT '',
+                    zone_id TEXT NOT NULL DEFAULT '',
+                    start_time TEXT NOT NULL,
+                    end_time TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN (
+                        'scheduled', 'connecting', 'running', 'reconnecting',
+                        'stop_requested', 'completed', 'stopped', 'failed', 'interrupted'
+                    )),
+                    sample_fps REAL NOT NULL CHECK(sample_fps >= 0.2 AND sample_fps <= 10),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    started_at TEXT NOT NULL DEFAULT '',
+                    stopped_at TEXT NOT NULL DEFAULT '',
+                    frames_read INTEGER NOT NULL DEFAULT 0,
+                    frames_inferred INTEGER NOT NULL DEFAULT 0,
+                    frames_dropped INTEGER NOT NULL DEFAULT 0,
+                    inference_failures INTEGER NOT NULL DEFAULT 0,
+                    reconnect_count INTEGER NOT NULL DEFAULT 0,
+                    events_detected INTEGER NOT NULL DEFAULT 0,
+                    alarms_created INTEGER NOT NULL DEFAULT 0,
+                    highest_risk_level TEXT NOT NULL DEFAULT 'none',
+                    last_frame_at TEXT NOT NULL DEFAULT '',
+                    last_inference_at TEXT NOT NULL DEFAULT '',
+                    latest_detection_id TEXT NOT NULL DEFAULT '',
+                    latest_alarm_id TEXT NOT NULL DEFAULT '',
+                    latest_event_frame TEXT NOT NULL DEFAULT '',
+                    last_error_code TEXT NOT NULL DEFAULT '',
+                    last_error_message TEXT NOT NULL DEFAULT '',
+                    config_json TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE TABLE IF NOT EXISTS realtime_inspection_events (
+                    event_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL REFERENCES realtime_inspection_tasks(id) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL,
+                    detected_at TEXT NOT NULL,
+                    ended_at TEXT NOT NULL,
+                    class_name TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    bbox_json TEXT NOT NULL,
+                    risk_level TEXT NOT NULL,
+                    detection_id TEXT NOT NULL DEFAULT '',
+                    alarm_id TEXT NOT NULL DEFAULT '',
+                    image_path TEXT NOT NULL DEFAULT '',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    line_id TEXT NOT NULL DEFAULT '',
+                    last_seen_at TEXT NOT NULL DEFAULT '',
+                    event_status TEXT NOT NULL DEFAULT 'closed',
+                    hit_count INTEGER NOT NULL DEFAULT 0,
+                    class_counts_json TEXT NOT NULL DEFAULT '{}',
+                    max_confidence REAL NOT NULL DEFAULT 0,
+                    alarm_report TEXT NOT NULL DEFAULT '',
+                    llm_summary TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT '',
+                    UNIQUE(task_id, event_id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_messages_session_created
                     ON messages(session_id, created_at, id);
                 CREATE INDEX IF NOT EXISTS idx_detection_session_created
@@ -549,6 +700,12 @@ class SQLiteHistoryStore:
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_archive_segments_video_path
                     ON stream_archive_segments(video_path)
                     WHERE video_path <> '';
+                CREATE INDEX IF NOT EXISTS idx_realtime_session_created
+                    ON realtime_inspection_tasks(session_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_realtime_source_status
+                    ON realtime_inspection_tasks(source_id, status, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_realtime_events_task
+                    ON realtime_inspection_events(task_id, detected_at DESC);
                 """
             )
             missing_jobs = connection.execute(
@@ -602,6 +759,27 @@ class SQLiteHistoryStore:
             )
             self._ensure_column(
                 connection, "detection_runs", "reviewed_at", "TEXT NOT NULL DEFAULT ''"
+            )
+            for column, definition in (
+                ("line_id", "TEXT NOT NULL DEFAULT ''"),
+                ("last_seen_at", "TEXT NOT NULL DEFAULT ''"),
+                ("event_status", "TEXT NOT NULL DEFAULT 'closed'"),
+                ("hit_count", "INTEGER NOT NULL DEFAULT 0"),
+                ("class_counts_json", "TEXT NOT NULL DEFAULT '{}'"),
+                ("max_confidence", "REAL NOT NULL DEFAULT 0"),
+                ("alarm_report", "TEXT NOT NULL DEFAULT ''"),
+                ("llm_summary", "TEXT NOT NULL DEFAULT ''"),
+                ("updated_at", "TEXT NOT NULL DEFAULT ''"),
+            ):
+                self._ensure_column(
+                    connection, "realtime_inspection_events", column, definition
+                )
+            connection.execute(
+                "UPDATE realtime_inspection_events "
+                "SET last_seen_at = COALESCE(NULLIF(last_seen_at, ''), ended_at), "
+                "max_confidence = CASE WHEN max_confidence > 0 THEN max_confidence ELSE confidence END, "
+                "hit_count = CASE WHEN hit_count > 0 THEN hit_count ELSE 1 END, "
+                "updated_at = COALESCE(NULLIF(updated_at, ''), created_at)"
             )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_detection_line_created "
@@ -688,6 +866,41 @@ class SQLiteHistoryStore:
             detection_id=row["detection_id"],
             retry_count=int(row["retry_count"]),
             created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _realtime_task_from_row(row: sqlite3.Row) -> RealtimeInspectionTaskRecord:
+        return RealtimeInspectionTaskRecord(
+            id=row["id"], session_id=row["session_id"], source_id=row["source_id"],
+            line_id=row["line_id"], zone_id=row["zone_id"], start_time=row["start_time"],
+            end_time=row["end_time"], status=row["status"], sample_fps=float(row["sample_fps"]),
+            created_at=row["created_at"], updated_at=row["updated_at"],
+            started_at=row["started_at"], stopped_at=row["stopped_at"],
+            frames_read=int(row["frames_read"]), frames_inferred=int(row["frames_inferred"]),
+            frames_dropped=int(row["frames_dropped"]), inference_failures=int(row["inference_failures"]),
+            reconnect_count=int(row["reconnect_count"]), events_detected=int(row["events_detected"]),
+            alarms_created=int(row["alarms_created"]), highest_risk_level=row["highest_risk_level"],
+            last_frame_at=row["last_frame_at"], last_inference_at=row["last_inference_at"],
+            latest_detection_id=row["latest_detection_id"], latest_alarm_id=row["latest_alarm_id"],
+            latest_event_frame=row["latest_event_frame"], last_error_code=row["last_error_code"],
+            last_error_message=row["last_error_message"], config=_json_load(row["config_json"]),
+        )
+
+    @staticmethod
+    def _realtime_event_from_row(row: sqlite3.Row) -> RealtimeInspectionEventRecord:
+        return RealtimeInspectionEventRecord(
+            event_id=row["event_id"], task_id=row["task_id"], source_id=row["source_id"],
+            detected_at=row["detected_at"], ended_at=row["ended_at"],
+            class_name=row["class_name"], confidence=float(row["confidence"]),
+            bbox=list(_json_load(row["bbox_json"])), risk_level=row["risk_level"],
+            detection_id=row["detection_id"], alarm_id=row["alarm_id"], image_path=row["image_path"],
+            metadata=_json_load(row["metadata_json"]), created_at=row["created_at"],
+            line_id=row["line_id"], last_seen_at=row["last_seen_at"],
+            event_status=row["event_status"], hit_count=int(row["hit_count"]),
+            class_counts=dict(_json_load(row["class_counts_json"])),
+            max_confidence=float(row["max_confidence"]),
+            alarm_report=row["alarm_report"], llm_summary=row["llm_summary"],
+            updated_at=row["updated_at"],
         )
 
     @staticmethod
@@ -2067,3 +2280,252 @@ class SQLiteHistoryStore:
                 (timestamp,),
             )
         return int(cursor.rowcount)
+
+    def create_realtime_inspection_task(
+        self, session_id: str, *, source_id: str, line_id: str, zone_id: str,
+        start_time: str | datetime, end_time: str | datetime, sample_fps: float,
+        config: Mapping[str, Any],
+    ) -> RealtimeInspectionTaskRecord:
+        self.ensure_session(session_id)
+        timestamp = self._timestamp()
+        task_id = f"realtime-{uuid.uuid4().hex[:12]}"
+        start = _normalized_utc_time(start_time, "start_time")
+        end = _normalized_utc_time(end_time, "end_time")
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO realtime_inspection_tasks(
+                    id, session_id, source_id, line_id, zone_id, start_time, end_time,
+                    status, sample_fps, created_at, updated_at, config_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?)""",
+                (task_id, session_id, source_id, line_id, zone_id, start, end,
+                 float(sample_fps), timestamp, timestamp, _json_dump(dict(config))),
+            )
+            row = connection.execute("SELECT * FROM realtime_inspection_tasks WHERE id = ?", (task_id,)).fetchone()
+        return self._realtime_task_from_row(row)
+
+    def get_realtime_inspection_task(self, task_id: str) -> Optional[RealtimeInspectionTaskRecord]:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM realtime_inspection_tasks WHERE id = ?", (task_id,)).fetchone()
+        return self._realtime_task_from_row(row) if row else None
+
+    def list_realtime_inspection_tasks(
+        self, *, session_id: Optional[str] = None, source_id: str = "",
+        statuses: Optional[tuple[str, ...]] = None, limit: int = 10,
+    ) -> List[RealtimeInspectionTaskRecord]:
+        clauses: List[str] = []
+        values: List[Any] = []
+        if session_id is not None: clauses.append("session_id = ?"); values.append(session_id)
+        if source_id: clauses.append("source_id = ?"); values.append(source_id)
+        if statuses:
+            invalid = set(statuses) - VALID_REALTIME_INSPECTION_STATUSES
+            if invalid: raise ValueError(f"无效实时巡检状态：{sorted(invalid)}")
+            clauses.append("status IN (%s)" % ",".join("?" for _ in statuses)); values.extend(statuses)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM realtime_inspection_tasks{where} ORDER BY created_at DESC LIMIT ?",
+                (*values, max(1, min(int(limit), 100))),
+            ).fetchall()
+        return [self._realtime_task_from_row(row) for row in rows]
+
+    def update_realtime_inspection_task(self, task_id: str, **changes: Any) -> RealtimeInspectionTaskRecord:
+        allowed = {"status", "started_at", "stopped_at", "frames_read", "frames_inferred",
+                   "frames_dropped", "inference_failures", "reconnect_count", "events_detected",
+                   "alarms_created", "highest_risk_level", "last_frame_at", "last_inference_at",
+                   "latest_detection_id", "latest_alarm_id", "latest_event_frame",
+                   "last_error_code", "last_error_message"}
+        unknown = set(changes) - allowed
+        if unknown: raise ValueError(f"不支持的实时巡检字段：{sorted(unknown)}")
+        if "status" in changes and changes["status"] not in VALID_REALTIME_INSPECTION_STATUSES:
+            raise ValueError(f"无效实时巡检状态：{changes['status']}")
+        if not changes:
+            task = self.get_realtime_inspection_task(task_id)
+            if task is None: raise LookupError(f"找不到实时巡检任务：{task_id}")
+            return task
+        changes["updated_at"] = self._timestamp()
+        setters = ", ".join(f"{key} = ?" for key in changes)
+        with self._connect() as connection:
+            cursor = connection.execute(f"UPDATE realtime_inspection_tasks SET {setters} WHERE id = ?", (*changes.values(), task_id))
+            if not cursor.rowcount: raise LookupError(f"找不到实时巡检任务：{task_id}")
+            row = connection.execute("SELECT * FROM realtime_inspection_tasks WHERE id = ?", (task_id,)).fetchone()
+        return self._realtime_task_from_row(row)
+
+    def record_realtime_inspection_event(
+        self, *, event_id: str, task_id: str, source_id: str, detected_at: str,
+        ended_at: str, class_name: str, confidence: float, bbox: List[float],
+        risk_level: str, detection_id: str, alarm_id: str, image_path: str,
+        metadata: Mapping[str, Any], line_id: str = "", last_seen_at: str = "",
+        event_status: str = "closed", hit_count: int = 1,
+        class_counts: Optional[Mapping[str, int]] = None,
+        max_confidence: Optional[float] = None, alarm_report: str = "",
+        llm_summary: str = "",
+    ) -> RealtimeInspectionEventRecord:
+        if event_status not in {"active", "closed"}:
+            raise ValueError("event_status 只能是 active 或 closed")
+        timestamp = self._timestamp()
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO realtime_inspection_events(event_id, task_id, source_id,
+                   detected_at, ended_at, class_name, confidence, bbox_json, risk_level,
+                   detection_id, alarm_id, image_path, metadata_json, created_at,
+                   line_id, last_seen_at, event_status, hit_count, class_counts_json,
+                   max_confidence, alarm_report, llm_summary, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (event_id, task_id, source_id, detected_at, ended_at, class_name,
+                 float(confidence), _json_dump(list(bbox)), risk_level, detection_id,
+                 alarm_id, image_path, _json_dump(dict(metadata)), timestamp,
+                 str(line_id or ""), str(last_seen_at or ended_at), event_status,
+                 max(1, int(hit_count)), _json_dump(dict(class_counts or {class_name: 1})),
+                 float(max_confidence if max_confidence is not None else confidence),
+                 str(alarm_report or ""), str(llm_summary or ""), timestamp),
+            )
+            row = connection.execute("SELECT * FROM realtime_inspection_events WHERE event_id = ?", (event_id,)).fetchone()
+        return self._realtime_event_from_row(row)
+
+    def get_realtime_inspection_event(
+        self, event_id: str
+    ) -> Optional[RealtimeInspectionEventRecord]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM realtime_inspection_events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+        return self._realtime_event_from_row(row) if row else None
+
+    def update_realtime_inspection_event(
+        self, event_id: str, **changes: Any
+    ) -> RealtimeInspectionEventRecord:
+        allowed = {
+            "ended_at", "last_seen_at", "event_status", "class_name",
+            "confidence", "max_confidence", "bbox", "risk_level", "image_path",
+            "hit_count", "class_counts", "metadata", "alarm_report", "llm_summary",
+        }
+        unknown = set(changes) - allowed
+        if unknown:
+            raise ValueError(f"不支持的实时事件字段：{sorted(unknown)}")
+        if changes.get("event_status") not in (None, "active", "closed"):
+            raise ValueError("event_status 只能是 active 或 closed")
+        column_names = {
+            "bbox": "bbox_json", "class_counts": "class_counts_json",
+            "metadata": "metadata_json",
+        }
+        serialized = dict(changes)
+        for name in ("bbox", "class_counts", "metadata"):
+            if name in serialized:
+                serialized[name] = _json_dump(serialized[name])
+        serialized["updated_at"] = self._timestamp()
+        assignments = ", ".join(
+            f"{column_names.get(name, name)} = ?" for name in serialized
+        )
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"UPDATE realtime_inspection_events SET {assignments} WHERE event_id = ?",
+                (*serialized.values(), event_id),
+            )
+            if not cursor.rowcount:
+                raise LookupError(f"找不到实时巡检事件：{event_id}")
+            row = connection.execute(
+                "SELECT * FROM realtime_inspection_events WHERE event_id = ?", (event_id,)
+            ).fetchone()
+        return self._realtime_event_from_row(row)
+
+    def list_realtime_inspection_events(
+        self, task_id: str, limit: Optional[int] = 20, *,
+        active_only: bool = False, after_event_id: str = "", latest: bool = False,
+    ) -> List[RealtimeInspectionEventRecord]:
+        clauses = ["task_id = ?"]
+        values: List[Any] = [task_id]
+        if active_only:
+            clauses.append("event_status = 'active'")
+        if after_event_id:
+            clauses.append(
+                "rowid > COALESCE((SELECT rowid FROM realtime_inspection_events "
+                "WHERE event_id = ? AND task_id = ?), 0)"
+            )
+            values.extend((after_event_id, task_id))
+        order = "ASC" if after_event_id else "DESC"
+        effective_limit = 1 if latest else limit
+        query = (
+            "SELECT * FROM realtime_inspection_events WHERE "
+            + " AND ".join(clauses)
+            + f" ORDER BY rowid {order}"
+        )
+        with self._connect() as connection:
+            if effective_limit is None:
+                rows = connection.execute(query, tuple(values)).fetchall()
+            else:
+                rows = connection.execute(
+                    query + " LIMIT ?",
+                    (*values, max(1, min(int(effective_limit), 100))),
+                ).fetchall()
+        return [self._realtime_event_from_row(row) for row in rows]
+
+    def update_detection_alarm(
+        self, detection_id: str, alarm_id: str, *, detection: Mapping[str, Any],
+        alarm_document: Mapping[str, Any], alarm_report: str,
+        source_ended_at: str,
+    ) -> tuple[DetectionRecord, AlarmRecord]:
+        overall = alarm_document.get("overall_risk") or {}
+        risk_level = str(overall.get("level") or "none").lower()
+        timestamp = self._timestamp()
+        with self._connect() as connection:
+            detection_row = connection.execute(
+                "SELECT * FROM detection_runs WHERE id = ?", (detection_id,)
+            ).fetchone()
+            alarm_row = connection.execute(
+                "SELECT * FROM alarms WHERE id = ? AND detection_id = ?",
+                (alarm_id, detection_id),
+            ).fetchone()
+            if detection_row is None or alarm_row is None:
+                raise LookupError("找不到需要更新的实时检测或报警记录")
+            connection.execute(
+                """UPDATE detection_runs SET status = ?, risk_level = ?, summary_json = ?,
+                   alarm_report = ?, source_ended_at = ? WHERE id = ?""",
+                (str(detection.get("status") or "completed"), risk_level,
+                 _json_dump(dict(detection)), alarm_report, source_ended_at, detection_id),
+            )
+            connection.execute(
+                """UPDATE alarms SET risk_level = ?, requires_stop = ?, report_json = ?,
+                   report_text = ?, updated_at = ? WHERE id = ?""",
+                (risk_level, int(bool(overall.get("requires_stop"))),
+                 _json_dump(dict(alarm_document)), alarm_report, timestamp, alarm_id),
+            )
+            detection_row = connection.execute(
+                "SELECT * FROM detection_runs WHERE id = ?", (detection_id,)
+            ).fetchone()
+            alarm_row = connection.execute(
+                "SELECT * FROM alarms WHERE id = ?", (alarm_id,)
+            ).fetchone()
+        return self._detection_from_row(detection_row), self._alarm_from_row(alarm_row)
+
+    def interrupt_active_realtime_inspections(self) -> int:
+        timestamp = self._timestamp()
+        with self._connect() as connection:
+            active_rows = connection.execute(
+                "SELECT id FROM realtime_inspection_tasks WHERE status IN "
+                "('scheduled','connecting','running','reconnecting','stop_requested')"
+            ).fetchall()
+            active_ids = [str(row["id"]) for row in active_rows]
+            cursor = connection.execute(
+                """UPDATE realtime_inspection_tasks SET status = 'interrupted', stopped_at = ?,
+                   updated_at = ?, last_error_code = 'task_interrupted',
+                   last_error_message = 'Web 服务重启，实时巡检任务已中断，未自动恢复。'
+                   WHERE status IN ('scheduled','connecting','running','reconnecting','stop_requested')""",
+                (timestamp, timestamp),
+            )
+            if active_ids:
+                placeholders = ",".join("?" for _ in active_ids)
+                connection.execute(
+                    f"""UPDATE realtime_inspection_events
+                    SET event_status = 'closed', ended_at = COALESCE(NULLIF(last_seen_at, ''), ?),
+                        updated_at = ?
+                    WHERE event_status = 'active' AND task_id IN ({placeholders})""",
+                    (timestamp, timestamp, *active_ids),
+                )
+                connection.execute(
+                    f"""UPDATE detection_runs SET source_ended_at = ?
+                    WHERE id IN (SELECT detection_id FROM realtime_inspection_events
+                    WHERE task_id IN ({placeholders}))""",
+                    (timestamp, *active_ids),
+                )
+            return int(cursor.rowcount)
