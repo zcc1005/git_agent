@@ -15,6 +15,7 @@ from agent import AgentService, AgentTools
 from agent.llm_api import (
     LLMAPIConfig,
     OpenAICompatibleClient,
+    OpenAICompatibleDetectionExplainer,
     OpenAICompatibleSkillPlanner,
     load_env_file,
 )
@@ -420,6 +421,7 @@ def create_web_agent_service() -> AgentService:
         load_env_file(PROJECT_ROOT / ".env")
         client = OpenAICompatibleClient(LLMAPIConfig.from_env())
         planner = OpenAICompatibleSkillPlanner(client)
+        agent_tools.set_detection_explainer(OpenAICompatibleDetectionExplainer(client))
         service = AgentService(
             agent_history_store,
             tools=agent_tools,
@@ -427,6 +429,7 @@ def create_web_agent_service() -> AgentService:
             skill_planner_mode=os.getenv("LLM_PLANNER_MODE", "hybrid"),
         )
     except (OSError, ValueError) as exc:
+        agent_tools.set_detection_explainer(None)
         app.config["AGENT_LLM_ENABLED"] = False
         app.config["AGENT_LLM_INIT_ERROR"] = str(exc)
         app.logger.warning("Web 智能体未启用大模型规划器：%s", exc)
@@ -460,7 +463,7 @@ def enrich_alarm_report_data(data: Any) -> None:
             data["alarm_report"] = record.alarm_report
     if detection_id and not data.get("event_frames"):
         record = agent_history_store.get_detection(detection_id)
-        if record is not None and record.source_type == "video":
+        if record is not None and record.source_type in {"video", "realtime"}:
             data["event_frames"] = AgentTools.video_event_frames(record.summary)
         elif record is not None and record.source_type == "image":
             data["event_frames"] = AgentTools.image_event_frames(
@@ -498,13 +501,15 @@ def _monitoring_request_body() -> Dict[str, Any]:
         "interval_seconds",
         "segment_seconds",
         "retention_hours",
+        "sample_fps",
+        "reconnect_interval_seconds",
+        "event_silence_seconds",
     ):
         if name in payload:
             payload[name] = float(payload[name])
-    if "max_consecutive_failures" in payload:
-        payload["max_consecutive_failures"] = int(
-            payload["max_consecutive_failures"]
-        )
+    for name in ("max_consecutive_failures", "min_event_hits"):
+        if name in payload:
+            payload[name] = int(payload[name])
     return payload
 
 
@@ -522,11 +527,46 @@ def _monitoring_http_status(result: Mapping[str, Any]) -> int:
     if error_code in {
         "invalid_arguments",
         "invalid_schedule",
+        "invalid_parameters",
         "invalid_archive_config",
         "archive_range_in_future",
     }:
         return 400
     return 409
+
+
+def _query_realtime_detail(
+    session_id: str, *, task_id: str = "", source_id: str = "", limit: int = 20,
+    event_id: str = "", after_event_id: str = "", latest: bool = False,
+    active_only: bool = False, events_only: bool = False,
+) -> Dict[str, Any]:
+    service = get_agent_service()
+    result = service.run_skill(
+        "control-realtime-inspection", session_id=session_id,
+        arguments={"action": "query", **({"task_id": task_id} if task_id else {}),
+                   **({"source_id": source_id} if source_id else {}),
+                   **({"event_id": event_id} if event_id else {}),
+                   **({"after_event_id": after_event_id} if after_event_id else {}),
+                   "latest": latest, "active_only": active_only,
+                   "events_only": events_only, "limit": limit},
+    )
+    if not result.get("ok") or task_id:
+        return result
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    if isinstance(data.get("task"), Mapping):
+        return result
+    tasks = data.get("tasks", [])
+    if not tasks:
+        return result
+    latest_id = str(tasks[0].get("task_id") or "")
+    return service.run_skill(
+        "control-realtime-inspection", session_id=session_id,
+        arguments={"action": "query", "task_id": latest_id, "limit": limit,
+                   **({"event_id": event_id} if event_id else {}),
+                   **({"after_event_id": after_event_id} if after_event_id else {}),
+                   "latest": latest, "active_only": active_only,
+                   "events_only": events_only},
+    )
 
 
 def _query_monitoring_detail(
@@ -757,6 +797,16 @@ def api_agent_chat():
             alarm_id = request.form.get("alarm_id", "").strip()
             if alarm_id:
                 context["alarm_id"] = alarm_id
+            detection_id = request.form.get("detection_id", "").strip()
+            if len(detection_id) > 128:
+                raise ValueError("detection_id 不能超过 128 个字符")
+            if detection_id:
+                context["detection_id"] = detection_id
+            task_id = request.form.get("task_id", "").strip()
+            if len(task_id) > 128:
+                raise ValueError("task_id 不能超过 128 个字符")
+            if task_id:
+                context["task_id"] = task_id
             if not message:
                 response = get_agent_service().receive_attachment(
                     media_type,
@@ -845,6 +895,72 @@ def api_agent_monitoring_start():
             },
         }
         return jsonify(body), _monitoring_http_status(result)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.post("/api/agent/realtime-inspection/start")
+def api_agent_realtime_inspection_start():
+    try:
+        payload = _monitoring_request_body()
+        session_id = _monitoring_session_id(payload.pop("session_id", "default"))
+        result = get_agent_service().run_skill(
+            "start-realtime-inspection", session_id=session_id, arguments=payload
+        )
+        return jsonify({**result, "session_id": session_id,
+                        "status_url": "/api/agent/realtime-inspection/status",
+                        "events_url": "/api/agent/realtime-inspection/events",
+                        "polling": {"recommended_interval_ms": 3000}}), _monitoring_http_status(result)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.post("/api/agent/realtime-inspection/stop")
+def api_agent_realtime_inspection_stop():
+    try:
+        payload = _monitoring_request_body()
+        session_id = _monitoring_session_id(payload.pop("session_id", "default"))
+        result = get_agent_service().run_skill(
+            "control-realtime-inspection", session_id=session_id,
+            arguments={"action": "stop", **payload},
+        )
+        return jsonify({**result, "session_id": session_id}), _monitoring_http_status(result)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.get("/api/agent/realtime-inspection/status")
+def api_agent_realtime_inspection_status():
+    try:
+        session_id = _monitoring_session_id(request.args.get("session_id"))
+        result = _query_realtime_detail(
+            session_id, task_id=str(request.args.get("task_id") or ""),
+            source_id=str(request.args.get("source_id") or ""), limit=int(request.args.get("limit", 20)),
+        )
+        return jsonify({**result, "session_id": session_id}), _monitoring_http_status(result)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.get("/api/agent/realtime-inspection/events")
+def api_agent_realtime_inspection_events():
+    try:
+        session_id = _monitoring_session_id(request.args.get("session_id"))
+        limit = int(request.args.get("limit", 20))
+        if not 1 <= limit <= 100:
+            raise ValueError("limit 必须在 1 到 100 之间")
+        as_bool = lambda name: str(request.args.get(name, "")).strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        result = _query_realtime_detail(
+            session_id, task_id=str(request.args.get("task_id") or ""),
+            source_id=str(request.args.get("source_id") or ""), limit=limit,
+            event_id=str(request.args.get("event_id") or ""),
+            after_event_id=str(request.args.get("after_event_id") or ""),
+            latest=as_bool("latest"), active_only=as_bool("active_only"),
+            events_only=True,
+        )
+        return jsonify({**result, "session_id": session_id}), _monitoring_http_status(result)
     except (TypeError, ValueError) as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
