@@ -1,10 +1,10 @@
 {
-  "command": "go",
-  "meaning": "开始检测",
+  "command": "yes",
+  "meaning": "确认报警",
   "confidence": 1.0,
-  "start_detection": true,
-  "confirm_alarm": false,
+  "start_detection": false,
+  "confirm_alarm": true,
   "cancel_alarm": false,
-  "timestamp": "2026-07-16 17:10:17",
-  "source": "manual"
+  "timestamp": "2026-07-21 17:37:39",
+  "source": "web_alarm_control"
 }
