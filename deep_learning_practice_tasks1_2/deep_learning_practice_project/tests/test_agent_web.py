@@ -237,6 +237,13 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertIn('data-agent-monitoring', html)
         self.assertIn('/api/agent/monitoring/events', html)
         self.assertIn('data-realtime-events-endpoint="/api/agent/realtime-inspection/events"', html)
+        self.assertIn('data-agent-realtime-card', html)
+        self.assertIn('data-agent-realtime-events', html)
+        self.assertIn('data-agent-session-tabs', html)
+        self.assertIn('data-agent-session-new', html)
+        self.assertIn('<h2 id="dashboardTitle">智能巡检助手</h2>', html)
+        self.assertNotIn('id="agentChatTitle"', html)
+        self.assertNotIn('理解巡检目标，调用检测、风险研判、历史查询和报警控制能力。', html)
         self.assertNotIn('data-agent-realtime-source', html)
         self.assertNotIn('<strong>持续实时巡检</strong>', html)
         self.assertNotIn('data-agent-followups', html)
@@ -253,8 +260,39 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertIn('realtimeEventKey(event)', script)
         self.assertIn('displayedRealtimeEvents.has(key)', script)
         self.assertIn('event.event_status === "closed" ? "已关闭" : "持续中"', script)
-        self.assertIn('realtimeReportAnnouncedTaskId !== String(task.task_id)', script)
+        self.assertNotIn('realtimeReportAnnouncedTaskId', script)
         self.assertIn('new CustomEvent("agent:realtime-event"', script)
+
+    def test_realtime_task_card_is_global_and_chat_notifications_are_high_risk_only(self) -> None:
+        script = (
+            Path(__file__).resolve().parents[1] / "static" / "agent_chat" / "agent_chat.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('activeRealtimeTaskStorageKey', script)
+        self.assertIn('active_task_id: taskId', script)
+        self.assertIn('realtimeTaskOwnerSessionId', script)
+        self.assertIn('const realtimeEventsByKey = new Map()', script)
+        self.assertIn('realtimeEventKey(event)', script)
+        self.assertIn('String(event.risk_level || "").toLowerCase() === "high"', script)
+        self.assertIn('新的高风险报警，请展开顶部任务卡查看并处置', script)
+        self.assertNotIn('检测到新的实时异物事件。', script)
+        self.assertNotIn('append("assistant", result.reply || "实时巡检已结束。"', script)
+
+    def test_multi_session_tabs_do_not_restart_global_realtime_pollers(self) -> None:
+        script = (
+            Path(__file__).resolve().parents[1] / "static" / "agent_chat" / "agent_chat.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('function switchSession(nextSessionId)', script)
+        self.assertIn('function createSession()', script)
+        self.assertIn('function closeSession(targetSessionId)', script)
+        switch_body = script.split('function switchSession(nextSessionId)', 1)[1].split(
+            'function createSession()', 1
+        )[0]
+        self.assertNotIn('pollRealtime(', switch_body)
+        self.assertNotIn('scheduleRealtimeEventPoll(', switch_body)
+        self.assertEqual(script.count('let realtimeTimer = 0'), 1)
+        self.assertEqual(script.count('let realtimeEventTimer = 0'), 1)
 
     def test_knowledge_reference_is_rendered_as_compact_final_line(self) -> None:
         script = (
@@ -312,6 +350,22 @@ class AgentWebIntegrationTests(unittest.TestCase):
             self.service.chat_calls[0]["context"]["task_id"],
             "realtime-current-123",
         )
+
+    def test_chat_endpoint_forwards_global_realtime_task_owner_session(self) -> None:
+        response = self.client.post(
+            "/api/agent/chat",
+            data={
+                "message": "查看当前实时巡检状态",
+                "session_id": "chat-new",
+                "task_id": "realtime-current-123",
+                "task_session_id": "chat-owner",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        context = self.service.chat_calls[0]["context"]
+        self.assertEqual(context["task_id"], "realtime-current-123")
+        self.assertEqual(context["task_session_id"], "chat-owner")
 
     def test_chat_endpoint_saves_video_and_builds_context(self) -> None:
         saved_video = Path("outputs/uploaded_videos/saved.mp4")

@@ -11,15 +11,47 @@
   data-realtime-stop-endpoint="/api/agent/realtime-inspection/stop"
   data-realtime-status-endpoint="/api/agent/realtime-inspection/status"
   data-realtime-events-endpoint="/api/agent/realtime-inspection/events"
-  aria-labelledby="agentChatTitle"
+  aria-label="智能巡检助手"
 >
-  <header class="agent-chat__header">
-    <div>
-      <h2 id="agentChatTitle">智能巡检助手</h2>
-      <p>理解巡检目标，调用检测、风险研判、历史查询和报警控制能力。</p>
+  <section class="agent-chat__realtime-card is-collapsed" data-agent-realtime-card aria-live="polite">
+    <button class="agent-chat__realtime-summary" type="button" data-agent-realtime-toggle aria-expanded="false">
+      <span class="agent-chat__realtime-dot" data-agent-realtime-dot></span>
+      <strong data-agent-realtime-title>实时巡检：暂无运行任务</strong>
+      <span data-agent-realtime-summary>启动后可在这里查看状态和事件</span>
+      <em data-agent-realtime-unread hidden>0</em>
+      <span class="agent-chat__realtime-chevron" aria-hidden="true">⌄</span>
+    </button>
+    <div class="agent-chat__realtime-detail" data-agent-realtime-detail hidden>
+      <div class="agent-chat__realtime-metrics">
+        <div><span>运行状态</span><strong data-agent-realtime-status>未启动</strong></div>
+        <div><span>运行时长</span><strong data-agent-realtime-duration>—</strong></div>
+        <div><span>读取帧数</span><strong data-agent-realtime-frames-read>0</strong></div>
+        <div><span>推理帧数</span><strong data-agent-realtime-frames-inferred>0</strong></div>
+        <div><span>事件数</span><strong data-agent-realtime-event-count>0</strong></div>
+        <div><span>待处理报警</span><strong data-agent-realtime-pending-count>0</strong></div>
+        <div><span>最高风险</span><strong data-agent-realtime-risk>无风险</strong></div>
+        <div><span>最近事件</span><strong data-agent-realtime-latest>暂无</strong></div>
+      </div>
+      <div class="agent-chat__realtime-events-head">
+        <strong>实时事件中心</strong>
+        <div>
+          <button type="button" data-agent-realtime-confirm hidden>确认待处理报警</button>
+          <button type="button" data-agent-realtime-cancel hidden>取消待处理报警</button>
+          <button type="button" data-agent-realtime-stop hidden>停止任务</button>
+        </div>
+      </div>
+      <div class="agent-chat__realtime-events" data-agent-realtime-events>
+        <p class="agent-chat__realtime-empty">当前没有确认异物事件。</p>
+      </div>
+      <p class="agent-chat__realtime-terminal" data-agent-realtime-terminal hidden></p>
     </div>
+  </section>
+
+  <nav class="agent-chat__sessions" aria-label="对话列表">
+    <div data-agent-session-tabs></div>
+    <button type="button" data-agent-session-new title="新建对话">＋ 新对话</button>
     <span class="agent-chat__status" data-agent-status>待命</span>
-  </header>
+  </nav>
 
   <section class="agent-chat__monitoring" data-agent-monitoring hidden aria-live="polite">
     <div class="agent-chat__monitoring-head">

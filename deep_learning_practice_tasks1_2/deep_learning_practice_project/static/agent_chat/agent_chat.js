@@ -525,6 +525,8 @@ function monitoringPathLabel(path) {
 }
 
 export function mountAgentChat(root) {
+  if (root.dataset.agentChatMounted === "true") return;
+  root.dataset.agentChatMounted = "true";
   const form = root.querySelector("[data-agent-form]");
   const textarea = form.querySelector("textarea[name='message']");
   const mediaInput = form.querySelector("input[name='media']");
@@ -540,6 +542,28 @@ export function mountAgentChat(root) {
   const monitoringReason = root.querySelector("[data-agent-monitoring-reason]");
   const monitoringProgressBar = root.querySelector("[data-agent-monitoring-progress-bar]");
   const monitoringStop = root.querySelector("[data-agent-monitoring-stop]");
+  const realtimeCard = root.querySelector("[data-agent-realtime-card]");
+  const realtimeToggle = root.querySelector("[data-agent-realtime-toggle]");
+  const realtimeDetail = root.querySelector("[data-agent-realtime-detail]");
+  const realtimeTitle = root.querySelector("[data-agent-realtime-title]");
+  const realtimeSummary = root.querySelector("[data-agent-realtime-summary]");
+  const realtimeDot = root.querySelector("[data-agent-realtime-dot]");
+  const realtimeUnread = root.querySelector("[data-agent-realtime-unread]");
+  const realtimeStatus = root.querySelector("[data-agent-realtime-status]");
+  const realtimeDuration = root.querySelector("[data-agent-realtime-duration]");
+  const realtimeFramesRead = root.querySelector("[data-agent-realtime-frames-read]");
+  const realtimeFramesInferred = root.querySelector("[data-agent-realtime-frames-inferred]");
+  const realtimeEventCount = root.querySelector("[data-agent-realtime-event-count]");
+  const realtimePendingCount = root.querySelector("[data-agent-realtime-pending-count]");
+  const realtimeRisk = root.querySelector("[data-agent-realtime-risk]");
+  const realtimeLatest = root.querySelector("[data-agent-realtime-latest]");
+  const realtimeEvents = root.querySelector("[data-agent-realtime-events]");
+  const realtimeTerminal = root.querySelector("[data-agent-realtime-terminal]");
+  const realtimeStop = root.querySelector("[data-agent-realtime-stop]");
+  const realtimeConfirm = root.querySelector("[data-agent-realtime-confirm]");
+  const realtimeCancel = root.querySelector("[data-agent-realtime-cancel]");
+  const sessionTabs = root.querySelector("[data-agent-session-tabs]");
+  const newSessionButton = root.querySelector("[data-agent-session-new]");
   const endpoint = root.dataset.endpoint || "/api/agent/chat";
   const historyEndpoint = root.dataset.historyEndpoint || "/api/agent/history";
   const monitoringStopEndpoint = root.dataset.monitoringStopEndpoint
@@ -548,29 +572,52 @@ export function mountAgentChat(root) {
     || "/api/agent/monitoring/events";
   const realtimeStatusEndpoint = root.dataset.realtimeStatusEndpoint || "/api/agent/realtime-inspection/status";
   const realtimeEventsEndpoint = root.dataset.realtimeEventsEndpoint || "/api/agent/realtime-inspection/events";
+  const realtimeStopEndpoint = root.dataset.realtimeStopEndpoint || "/api/agent/realtime-inspection/stop";
   const storageKey = "foreign-object-agent-session";
-  let sessionId = localStorage.getItem(storageKey);
-  if (!sessionId) {
-    sessionId = newSessionId();
-    localStorage.setItem(storageKey, sessionId);
+  const sessionsStorageKey = `${storageKey}:sessions-v1`;
+  const activeRealtimeTaskStorageKey = `${storageKey}:active-realtime-task`;
+  let sessions = [];
+  try {
+    const stored = JSON.parse(localStorage.getItem(sessionsStorageKey) || "[]");
+    if (Array.isArray(stored)) sessions = stored.filter((item) => item?.id);
+  } catch (_error) {
+    sessions = [];
   }
-  const monitoringTaskStorageKey = `${storageKey}:monitoring-task:${sessionId}`;
-  let monitoringTaskId = localStorage.getItem(monitoringTaskStorageKey) || "";
+  let sessionId = localStorage.getItem(storageKey) || "";
+  if (!sessions.length) {
+    sessionId = sessionId || newSessionId();
+    sessions = [{ id: sessionId, title: "对话 1" }];
+  } else if (!sessions.some((item) => item.id === sessionId)) {
+    sessionId = sessions[0].id;
+  }
+  localStorage.setItem(storageKey, sessionId);
+  localStorage.setItem(sessionsStorageKey, JSON.stringify(sessions));
+  const monitoringTaskStorageKey = () => `${storageKey}:monitoring-task:${sessionId}`;
+  let monitoringTaskId = localStorage.getItem(monitoringTaskStorageKey()) || "";
   let monitoringCursor = "";
   let monitoringTimer = 0;
   let monitoringPolling = false;
   let lastMonitoringAlarmId = "";
-  const realtimeTaskStorageKey = `${storageKey}:realtime-task:${sessionId}`;
-  const realtimeReportStorageKey = `${storageKey}:realtime-report:${sessionId}`;
-  let realtimeTaskId = localStorage.getItem(realtimeTaskStorageKey) || "";
-  let realtimeReportAnnouncedTaskId = localStorage.getItem(realtimeReportStorageKey) || "";
+  let activeTask = {};
+  try {
+    activeTask = JSON.parse(localStorage.getItem(activeRealtimeTaskStorageKey) || "{}") || {};
+  } catch (_error) {
+    activeTask = {};
+  }
+  let realtimeTaskId = String(activeTask.active_task_id || activeTask.task_id || "");
+  let realtimeTaskOwnerSessionId = String(activeTask.session_id || "");
   let realtimeTimer = 0;
   let realtimePolling = false;
   let realtimeEventTimer = 0;
   let realtimeEventPolling = false;
   let realtimeEventCursor = "";
   let displayedRealtimeEvents = new Set();
+  let highRiskNotifiedEvents = new Set();
+  let unreadRealtimeEvents = 0;
+  const realtimeEventsByKey = new Map();
+  const terminalAnnouncedTasks = new Set();
   let latestDetectionId = "";
+  let historyLoadToken = 0;
 
   function setLatestDetectionId(detectionId) {
     latestDetectionId = String(detectionId || "").trim();
@@ -581,6 +628,85 @@ export function mountAgentChat(root) {
     messages.appendChild(article);
     messages.scrollTop = messages.scrollHeight;
     return article;
+  }
+
+  function persistSessions() {
+    localStorage.setItem(sessionsStorageKey, JSON.stringify(sessions.slice(0, 12)));
+    localStorage.setItem(storageKey, sessionId);
+  }
+
+  function renderSessionTabs() {
+    sessionTabs.replaceChildren();
+    sessions.forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "agent-chat__session-tab";
+      button.classList.toggle("is-active", item.id === sessionId);
+      button.dataset.sessionId = item.id;
+      button.append(document.createTextNode(item.title || "对话"));
+      const close = document.createElement("span");
+      close.dataset.sessionClose = item.id;
+      close.title = "关闭对话";
+      close.textContent = "×";
+      button.append(close);
+      sessionTabs.append(button);
+    });
+  }
+
+  function setSessionTitle(message) {
+    const current = sessions.find((item) => item.id === sessionId);
+    if (!current || !/^对话\s*\d+$/.test(current.title || "")) return;
+    const clean = String(message || "").replace(/\s+/g, " ").trim();
+    if (!clean) return;
+    current.title = clean.length > 12 ? `${clean.slice(0, 12)}…` : clean;
+    persistSessions();
+    renderSessionTabs();
+  }
+
+  function switchSession(nextSessionId) {
+    if (!nextSessionId || nextSessionId === sessionId || sendButton.disabled) return;
+    sessionId = nextSessionId;
+    persistSessions();
+    renderSessionTabs();
+    latestDetectionId = "";
+    mediaInput.value = "";
+    fileLabel.textContent = "";
+    messages.replaceChildren();
+    window.clearTimeout(monitoringTimer);
+    monitoringTaskId = localStorage.getItem(monitoringTaskStorageKey()) || "";
+    monitoringCursor = "";
+    loadHistory();
+    pollMonitoring(true);
+  }
+
+  function createSession() {
+    if (sendButton.disabled) return;
+    const id = newSessionId();
+    sessions.push({ id, title: `对话 ${sessions.length + 1}` });
+    sessionId = id;
+    persistSessions();
+    renderSessionTabs();
+    latestDetectionId = "";
+    messages.replaceChildren();
+    append("assistant", "新对话已创建。实时巡检任务仍在后台运行。", false);
+    textarea.focus();
+  }
+
+  function closeSession(targetSessionId) {
+    if (sendButton.disabled) return;
+    sessions = sessions.filter((item) => item.id !== targetSessionId);
+    if (!sessions.length) {
+      const id = newSessionId();
+      sessions = [{ id, title: "对话 1" }];
+    }
+    if (sessionId === targetSessionId) {
+      sessionId = sessions[0].id;
+      messages.replaceChildren();
+      latestDetectionId = "";
+      loadHistory();
+    }
+    persistSessions();
+    renderSessionTabs();
   }
 
   function replaceAttachmentPreview(article, storedAttachment) {
@@ -679,7 +805,7 @@ export function mountAgentChat(root) {
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
         if (response.status === 404) {
-          localStorage.removeItem(monitoringTaskStorageKey);
+          localStorage.removeItem(monitoringTaskStorageKey());
           monitoringTaskId = "";
           monitoringPanel.hidden = true;
         }
@@ -691,14 +817,14 @@ export function mountAgentChat(root) {
       }
       if (data.task_id) {
         monitoringTaskId = String(data.task_id);
-        localStorage.setItem(monitoringTaskStorageKey, monitoringTaskId);
+        localStorage.setItem(monitoringTaskStorageKey(), monitoringTaskId);
       }
       if (data.next_cursor) monitoringCursor = String(data.next_cursor);
       renderMonitoring(data, { announceAlarm: !initial });
       if (!TERMINAL_MONITORING_STATUSES.has(String(data.status || ""))) {
         scheduleMonitoringPoll();
       } else {
-        localStorage.removeItem(monitoringTaskStorageKey);
+        localStorage.removeItem(monitoringTaskStorageKey());
       }
     } catch (_error) {
       scheduleMonitoringPoll(5000);
@@ -712,29 +838,171 @@ export function mountAgentChat(root) {
     monitoringTaskId = taskId;
     monitoringCursor = "";
     lastMonitoringAlarmId = "";
-    localStorage.setItem(monitoringTaskStorageKey, taskId);
+    localStorage.setItem(monitoringTaskStorageKey(), taskId);
     scheduleMonitoringPoll(0);
+  }
+
+  function realtimeStatusName(value) {
+    return {
+      scheduled: "等待开始",
+      connecting: "正在连接",
+      running: "运行中",
+      reconnecting: "正在重连",
+      stop_requested: "正在停止",
+      completed: "已结束",
+      stopped: "已停止",
+      failed: "异常结束",
+      interrupted: "意外中断",
+    }[String(value || "")] || String(value || "未知");
+  }
+
+  function realtimeRiskName(value) {
+    return { high: "高风险", medium: "中风险", low: "低风险", none: "无风险" }[
+      String(value || "none").toLowerCase()
+    ] || String(value || "无风险");
+  }
+
+  function realtimeElapsed(task) {
+    const start = new Date(task?.started_at || task?.start_time || "");
+    const terminal = TERMINAL_REALTIME_STATUSES.has(String(task?.status || ""));
+    const end = new Date(terminal ? (task?.stopped_at || task?.end_time || "") : Date.now());
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "—";
+    const seconds = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 1000));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const rest = seconds % 60;
+    return hours ? `${hours}小时${minutes}分` : minutes ? `${minutes}分${rest}秒` : `${rest}秒`;
+  }
+
+  function realtimeReportForEvent(event) {
+    if (typeof event?.alarm_report === "string") {
+      return { text: event.alarm_report, eventFrames: [] };
+    }
+    if (event?.alarm_report?.text) {
+      return { text: String(event.alarm_report.text), eventFrames: [] };
+    }
+    return null;
+  }
+
+  function renderRealtimeEventCenter() {
+    realtimeEvents.replaceChildren();
+    const events = [...realtimeEventsByKey.values()].sort((left, right) => (
+      String(right.detected_at || right.created_at || "").localeCompare(
+        String(left.detected_at || left.created_at || ""),
+      )
+    ));
+    if (!events.length) {
+      const empty = document.createElement("p");
+      empty.className = "agent-chat__realtime-empty";
+      empty.textContent = "当前没有确认异物事件。";
+      realtimeEvents.append(empty);
+      return;
+    }
+    events.forEach((event) => {
+      const article = createMessage("assistant", "", false);
+      article.dataset.realtimeEventKey = realtimeEventKey(event);
+      appendRealtimeEvent(article, event);
+      const report = realtimeReportForEvent(event);
+      if (report?.text) {
+        const body = document.createElement("div");
+        body.className = "agent-chat__report-body";
+        appendReportContent(body, report);
+        article.append(body);
+      }
+      realtimeEvents.append(article);
+    });
+  }
+
+  function updateRealtimeUnread() {
+    realtimeUnread.hidden = unreadRealtimeEvents <= 0;
+    realtimeUnread.textContent = String(unreadRealtimeEvents);
+  }
+
+  function ingestRealtimeEvents(
+    events,
+    { markUnread = false, notifyHighRisk = false, forceNew = false } = {},
+  ) {
+    let changed = false;
+    events.forEach((event) => {
+      if (!event?.event_id || !event?.task_id) return;
+      const key = realtimeEventKey(event);
+      const isNew = forceNew || !realtimeEventsByKey.has(key);
+      realtimeEventsByKey.set(key, event);
+      changed = true;
+      if (isNew && markUnread && realtimeCard.classList.contains("is-collapsed")) {
+        unreadRealtimeEvents += 1;
+      }
+      if (
+        isNew
+        && notifyHighRisk
+        && String(event.risk_level || "").toLowerCase() === "high"
+        && !highRiskNotifiedEvents.has(key)
+      ) {
+        append("assistant", "实时巡检发现新的高风险报警，请展开顶部任务卡查看并处置。", false);
+        highRiskNotifiedEvents.add(key);
+      }
+      if (event.detection_id) setLatestDetectionId(event.detection_id);
+      document.dispatchEvent(new CustomEvent("agent:realtime-event", {
+        detail: { event, task: activeTask.snapshot || {} },
+      }));
+    });
+    if (changed) renderRealtimeEventCenter();
+    updateRealtimeUnread();
   }
 
   function renderRealtime(task, events = []) {
     if (!task?.task_id) return;
-    events.forEach((event) => {
-      const key = realtimeEventKey(event);
-      messages.querySelectorAll("[data-realtime-event-key]").forEach((article) => {
-        if (article.dataset.realtimeEventKey !== key) return;
-        const statusNode = article.querySelector("[data-realtime-event-status]");
-        if (statusNode) statusNode.textContent = event.event_status === "closed" ? "已关闭" : "持续中";
-      });
-    });
+    activeTask.snapshot = task;
+    ingestRealtimeEvents(events);
+    const terminal = TERMINAL_REALTIME_STATUSES.has(String(task.status || ""));
+    const source = String(task.display_name || task.source_id || "监控源");
+    const pending = [...realtimeEventsByKey.values()].filter(
+      (event) => String(event.alarm_status || "") === "pending",
+    ).length;
+    const latestEvent = [...realtimeEventsByKey.values()].sort((left, right) => (
+      String(right.last_seen_at || right.detected_at || "").localeCompare(
+        String(left.last_seen_at || left.detected_at || ""),
+      )
+    ))[0];
+    const risk = String(task.highest_risk_level || latestEvent?.risk_level || "none");
+    realtimeTitle.textContent = terminal ? "实时巡检已结束" : `正在巡检：${source}`;
+    realtimeSummary.textContent = `${realtimeStatusName(task.status)} · ${realtimeElapsed(task)} · ${Number(task.events_detected || realtimeEventsByKey.size)}个事件 · ${realtimeRiskName(risk)}`;
+    realtimeStatus.textContent = realtimeStatusName(task.status);
+    realtimeDuration.textContent = realtimeElapsed(task);
+    realtimeFramesRead.textContent = String(Number(task.frames_read || 0));
+    realtimeFramesInferred.textContent = String(Number(task.frames_inferred || 0));
+    realtimeEventCount.textContent = String(Number(task.events_detected || realtimeEventsByKey.size));
+    realtimePendingCount.textContent = String(pending);
+    realtimeRisk.textContent = realtimeRiskName(risk);
+    realtimeLatest.textContent = latestEvent
+      ? `${latestEvent.class_name || "未知异物"} · ${latestEvent.detected_at || ""}`
+      : "暂无";
+    realtimeDot.className = `agent-chat__realtime-dot ${terminal ? "" : risk === "high" ? "is-warning" : "is-running"}`.trim();
+    realtimeStop.hidden = terminal;
+    realtimeConfirm.hidden = pending <= 0;
+    realtimeCancel.hidden = pending <= 0;
+    if (terminal) {
+      const reason = task.status === "completed"
+        ? "达到计划结束时间"
+        : task.status === "stopped"
+          ? "用户主动停止"
+          : task.last_error_message || realtimeStatusName(task.status);
+      realtimeTerminal.hidden = false;
+      realtimeTerminal.textContent = `实时巡检已结束：${source}，运行${realtimeElapsed(task)}，读取${Number(task.frames_read || 0)}帧，推理${Number(task.frames_inferred || 0)}帧，确认${Number(task.events_detected || realtimeEventsByKey.size)}个事件。结束原因：${reason}。`;
+      terminalAnnouncedTasks.add(String(task.task_id));
+    } else {
+      realtimeTerminal.hidden = true;
+    }
     document.dispatchEvent(new CustomEvent("agent:realtime-status", {
-      detail: { task, events },
+      detail: { task, events: [...realtimeEventsByKey.values()] },
     }));
   }
 
   function realtimeEventStorage(taskId) {
     return {
-      cursor: `${storageKey}:realtime-event-cursor:${sessionId}:${taskId}`,
-      seen: `${storageKey}:realtime-events-seen:${sessionId}:${taskId}`,
+      cursor: `${storageKey}:realtime-event-cursor:${taskId}`,
+      seen: `${storageKey}:realtime-events-seen:${taskId}`,
+      notified: `${storageKey}:realtime-high-risk-notified:${taskId}`,
     };
   }
 
@@ -747,12 +1015,23 @@ export function mountAgentChat(root) {
     } catch (_error) {
       displayedRealtimeEvents = new Set();
     }
+    try {
+      const values = JSON.parse(localStorage.getItem(keys.notified) || "[]");
+      highRiskNotifiedEvents = new Set(Array.isArray(values) ? values.map(String) : []);
+    } catch (_error) {
+      highRiskNotifiedEvents = new Set();
+    }
+    realtimeEventsByKey.clear();
+    unreadRealtimeEvents = 0;
+    updateRealtimeUnread();
+    renderRealtimeEventCenter();
   }
 
   function saveRealtimeEventState(taskId) {
     const keys = realtimeEventStorage(taskId);
     if (realtimeEventCursor) localStorage.setItem(keys.cursor, realtimeEventCursor);
     localStorage.setItem(keys.seen, JSON.stringify(Array.from(displayedRealtimeEvents).slice(-200)));
+    localStorage.setItem(keys.notified, JSON.stringify(Array.from(highRiskNotifiedEvents).slice(-200)));
   }
 
   function scheduleRealtimeEventPoll(delay = 3000) {
@@ -767,7 +1046,7 @@ export function mountAgentChat(root) {
     realtimeEventPolling = true;
     try {
       const url = new URL(realtimeEventsEndpoint, window.location.origin);
-      url.searchParams.set("session_id", sessionId);
+      url.searchParams.set("session_id", realtimeTaskOwnerSessionId || sessionId);
       url.searchParams.set("task_id", taskId);
       url.searchParams.set("limit", "50");
       if (realtimeEventCursor) url.searchParams.set("after_event_id", realtimeEventCursor);
@@ -779,13 +1058,14 @@ export function mountAgentChat(root) {
       events.forEach((event) => {
         const key = realtimeEventKey(event);
         if (!displayedRealtimeEvents.has(key)) {
-          const article = append("assistant", "检测到新的实时异物事件。", false);
-          appendRealtimeEvent(article, event);
           displayedRealtimeEvents.add(key);
-          if (event.detection_id) setLatestDetectionId(event.detection_id);
-          document.dispatchEvent(new CustomEvent("agent:realtime-event", {
-            detail: { event, task },
-          }));
+          ingestRealtimeEvents([event], {
+            markUnread: true,
+            notifyHighRisk: true,
+            forceNew: true,
+          });
+        } else {
+          ingestRealtimeEvents([event]);
         }
         realtimeEventCursor = String(event.event_id || realtimeEventCursor);
       });
@@ -793,6 +1073,7 @@ export function mountAgentChat(root) {
         realtimeEventCursor = String(result.data.next_event_id);
       }
       saveRealtimeEventState(taskId);
+      if (task?.task_id) renderRealtime(task, events);
       if (task && !TERMINAL_REALTIME_STATUSES.has(String(task.status || ""))) {
         scheduleRealtimeEventPoll(initial ? 1000 : 3000);
       }
@@ -811,28 +1092,24 @@ export function mountAgentChat(root) {
     }
     realtimePolling = true;
     try {
-      const requestedTaskId = realtimeTaskId;
       const url = new URL(realtimeStatusEndpoint, window.location.origin);
-      url.searchParams.set("session_id", sessionId);
+      url.searchParams.set("session_id", realtimeTaskOwnerSessionId || sessionId);
       if (realtimeTaskId) url.searchParams.set("task_id", realtimeTaskId);
       const response = await fetch(url);
       const result = await response.json().catch(() => ({}));
       const task = result.data?.task || result.data?.tasks?.[0];
       if (response.ok && result.ok && task) {
-        realtimeTaskId = String(task.task_id);
-        localStorage.setItem(realtimeTaskStorageKey, realtimeTaskId);
+        if (!realtimeTaskId) {
+          activateRealtime(String(task.task_id), task, realtimeTaskOwnerSessionId || sessionId);
+          return;
+        }
         renderRealtime(task, result.data?.events || []);
         if (!TERMINAL_REALTIME_STATUSES.has(String(task.status || ""))) {
           realtimeTimer = window.setTimeout(() => pollRealtime(), 3000);
         } else {
           await pollRealtimeEvents(false, String(task.task_id));
           window.clearTimeout(realtimeEventTimer);
-          localStorage.removeItem(realtimeTaskStorageKey);
-          if (requestedTaskId && realtimeReportAnnouncedTaskId !== String(task.task_id)) {
-            append("assistant", result.reply || "实时巡检已结束。", false);
-            realtimeReportAnnouncedTaskId = String(task.task_id);
-            localStorage.setItem(realtimeReportStorageKey, realtimeReportAnnouncedTaskId);
-          }
+          terminalAnnouncedTasks.add(String(task.task_id));
         }
       }
     } catch (_error) {
@@ -840,14 +1117,25 @@ export function mountAgentChat(root) {
     } finally { realtimePolling = false; }
   }
 
-  function activateRealtime(taskId, task = null) {
+  function activateRealtime(taskId, task = null, ownerSessionId = sessionId) {
+    const changedTask = taskId !== realtimeTaskId;
     realtimeTaskId = taskId;
-    loadRealtimeEventState(taskId);
-    localStorage.setItem(realtimeTaskStorageKey, taskId);
+    realtimeTaskOwnerSessionId = ownerSessionId || sessionId;
+    activeTask = {
+      active_task_id: taskId,
+      task_id: taskId,
+      session_id: realtimeTaskOwnerSessionId,
+      snapshot: task || activeTask.snapshot || null,
+    };
+    localStorage.setItem(activeRealtimeTaskStorageKey, JSON.stringify({
+      active_task_id: taskId,
+      task_id: taskId,
+      session_id: realtimeTaskOwnerSessionId,
+    }));
+    if (changedTask) loadRealtimeEventState(taskId);
     window.clearTimeout(realtimeTimer);
     if (task) renderRealtime(task);
     if (task && TERMINAL_REALTIME_STATUSES.has(String(task.status || ""))) {
-      localStorage.removeItem(realtimeTaskStorageKey);
       return;
     }
     realtimeTimer = window.setTimeout(() => pollRealtime(), 0);
@@ -873,6 +1161,34 @@ export function mountAgentChat(root) {
     }
   }
 
+  async function stopRealtimeInspection() {
+    if (!realtimeTaskId || realtimeStop.disabled) return;
+    realtimeStop.disabled = true;
+    try {
+      const response = await fetch(realtimeStopEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: realtimeTaskOwnerSessionId || sessionId,
+          task_id: realtimeTaskId,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || result.reply || "停止实时巡检失败");
+      }
+      const task = result.data?.task || result.data;
+      if (task?.task_id) renderRealtime(task, []);
+      window.clearTimeout(realtimeTimer);
+      realtimeTimer = window.setTimeout(() => pollRealtime(), 300);
+    } catch (error) {
+      realtimeTerminal.hidden = false;
+      realtimeTerminal.textContent = `停止任务失败：${error.message}`;
+    } finally {
+      realtimeStop.disabled = false;
+    }
+  }
+
   function setBusy(busy, busyText = "处理中") {
     textarea.disabled = busy;
     mediaInput.disabled = busy;
@@ -885,15 +1201,21 @@ export function mountAgentChat(root) {
   }
 
   async function loadHistory() {
+    const requestedSessionId = sessionId;
+    const token = ++historyLoadToken;
     try {
       const url = new URL(historyEndpoint, window.location.origin);
-      url.searchParams.set("session_id", sessionId);
+      url.searchParams.set("session_id", requestedSessionId);
       url.searchParams.set("limit", "50");
       const response = await fetch(url);
       const data = await response.json().catch(() => ({}));
+      if (token !== historyLoadToken || requestedSessionId !== sessionId) return;
       if (!response.ok || !data.ok || !Array.isArray(data.messages)) return;
-      if (data.messages.length === 0) return;
       messages.replaceChildren();
+      if (data.messages.length === 0) {
+        append("assistant", "我已待命。你可以上传图片或视频，也可以直接查询风险和历史记录。", false);
+        return;
+      }
       data.messages.forEach((item) => {
         const role = item.role === "user" ? "user" : "assistant";
         const storedAttachment = item.metadata?.attachment;
@@ -906,11 +1228,9 @@ export function mountAgentChat(root) {
         if (role === "assistant") {
           const realtimeReport = extractRealtimeReport(item.metadata?.data);
           const presentation = extractDetectionPresentation(item.metadata?.data);
-          if (realtimeReport) {
-            appendRealtimeReport(article, realtimeReport);
-          } else if (presentation) {
+          if (!realtimeReport && presentation) {
             appendDetectionPresentation(article, presentation);
-          } else {
+          } else if (!realtimeReport) {
             appendAlarmReport(article, extractAlarmReport(item.metadata?.data));
           }
           const detectionId = findDetectionId(item.metadata?.data);
@@ -926,6 +1246,7 @@ export function mountAgentChat(root) {
     const message = textarea.value.trim();
     const media = mediaInput.files?.[0];
     if (!message && !media) return;
+    if (message) setSessionTitle(message);
     const isImage = media && (
       media.type?.startsWith("image/")
       || /\.(?:jpe?g|png|bmp|webp)$/i.test(media.name)
@@ -973,6 +1294,9 @@ export function mountAgentChat(root) {
     body.append("session_id", sessionId);
     if (latestDetectionId) body.append("detection_id", latestDetectionId);
     if (realtimeTaskId) body.append("task_id", realtimeTaskId);
+    if (realtimeTaskId && realtimeTaskOwnerSessionId) {
+      body.append("task_session_id", realtimeTaskOwnerSessionId);
+    }
     if (media) body.append("media", media);
     textarea.value = "";
     textarea.style.height = "auto";
@@ -995,13 +1319,9 @@ export function mountAgentChat(root) {
       );
       const realtimeReport = extractRealtimeReport(data.data);
       const presentation = extractDetectionPresentation(data.data);
-      if (realtimeReport) {
-        appendRealtimeReport(assistantArticle, realtimeReport);
-        realtimeReportAnnouncedTaskId = String(realtimeReport.task_id);
-        localStorage.setItem(realtimeReportStorageKey, realtimeReportAnnouncedTaskId);
-      } else if (presentation) {
+      if (!realtimeReport && presentation) {
         appendDetectionPresentation(assistantArticle, presentation);
-      } else {
+      } else if (!realtimeReport) {
         appendAlarmReport(assistantArticle, extractAlarmReport(data.data));
       }
       const detectionId = findDetectionId(data.data);
@@ -1010,7 +1330,7 @@ export function mountAgentChat(root) {
       if (monitoringId) activateMonitoring(monitoringId);
       const realtimeTask = findRealtimeTask(data);
       const realtimeId = String(realtimeTask?.task_id || findRealtimeTaskId(data) || "");
-      if (realtimeId) activateRealtime(realtimeId, realtimeTask);
+      if (realtimeId) activateRealtime(realtimeId, realtimeTask, sessionId);
       document.dispatchEvent(new CustomEvent("agent:response", { detail: { data } }));
       if (data.attachment_received) {
         mediaInput.value = "";
@@ -1051,6 +1371,40 @@ export function mountAgentChat(root) {
   });
 
   monitoringStop?.addEventListener("click", stopMonitoring);
+  realtimeStop?.addEventListener("click", stopRealtimeInspection);
+  realtimeToggle?.addEventListener("click", () => {
+    const collapsed = !realtimeCard.classList.contains("is-collapsed");
+    realtimeCard.classList.toggle("is-collapsed", collapsed);
+    realtimeDetail.hidden = collapsed;
+    realtimeToggle.setAttribute("aria-expanded", String(!collapsed));
+    if (!collapsed) {
+      unreadRealtimeEvents = 0;
+      updateRealtimeUnread();
+    }
+  });
+  realtimeConfirm?.addEventListener("click", () => {
+    if (!realtimeTaskId) return;
+    textarea.value = "确认本轮报警";
+    textarea.dispatchEvent(new Event("input"));
+    form.requestSubmit();
+  });
+  realtimeCancel?.addEventListener("click", () => {
+    if (!realtimeTaskId) return;
+    textarea.value = "取消本轮报警";
+    textarea.dispatchEvent(new Event("input"));
+    form.requestSubmit();
+  });
+  newSessionButton?.addEventListener("click", createSession);
+  sessionTabs?.addEventListener("click", (event) => {
+    const close = event.target.closest("[data-session-close]");
+    if (close) {
+      event.stopPropagation();
+      closeSession(close.dataset.sessionClose);
+      return;
+    }
+    const tab = event.target.closest("[data-session-id]");
+    if (tab) switchSession(tab.dataset.sessionId);
+  });
 
   root.addEventListener("click", (event) => {
     const button = event.target.closest("[data-agent-alarm-action]");
@@ -1079,6 +1433,7 @@ export function mountAgentChat(root) {
     loadRealtimeEventState(realtimeTaskId);
     scheduleRealtimeEventPoll(0);
   }
+  renderSessionTabs();
   loadHistory();
   pollMonitoring(true);
   pollRealtime(true);

@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from agent import (
     AgentService,
@@ -167,6 +168,28 @@ class AgentServiceTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def test_realtime_task_can_be_queried_from_another_chat_session(self) -> None:
+        with patch.object(
+            self.service,
+            "run_skill",
+            return_value={"ok": True, "reply": "运行中。", "data": {"found": True}},
+        ) as run_skill:
+            result = self.service.chat(
+                "查看当前实时巡检状态",
+                session_id="chat-new",
+                context={
+                    "task_id": "realtime-task-1",
+                    "task_session_id": "chat-owner",
+                },
+            )
+
+        self.assertTrue(result["ok"])
+        run_skill.assert_called_once()
+        self.assertEqual(run_skill.call_args.kwargs["session_id"], "chat-owner")
+        self.assertEqual(
+            run_skill.call_args.kwargs["arguments"]["task_id"], "realtime-task-1"
+        )
 
     def test_detection_then_history_and_risk_queries(self) -> None:
         detected = self.service.chat(

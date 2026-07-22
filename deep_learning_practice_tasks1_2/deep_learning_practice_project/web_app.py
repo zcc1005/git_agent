@@ -807,6 +807,11 @@ def api_agent_chat():
                 raise ValueError("task_id 不能超过 128 个字符")
             if task_id:
                 context["task_id"] = task_id
+            task_session_id = request.form.get("task_session_id", "").strip()
+            if len(task_session_id) > 128:
+                raise ValueError("task_session_id 不能超过 128 个字符")
+            if task_session_id and task_id:
+                context["task_session_id"] = task_session_id
             if not message:
                 response = get_agent_service().receive_attachment(
                     media_type,

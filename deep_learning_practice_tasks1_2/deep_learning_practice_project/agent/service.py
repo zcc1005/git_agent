@@ -963,13 +963,16 @@ class AgentService:
         resolved_context = dict(incoming_context)
         if should_use_stored_attachment and not incoming_attachment:
             resolved_context = {**stored_attachment_context, **incoming_context}
+        realtime_session_id = str(
+            resolved_context.get("task_session_id") or session_id
+        )
         if realtime_event_arguments:
             for name in ("task_id", "source_id"):
                 if resolved_context.get(name):
                     realtime_event_arguments[name] = resolved_context[name]
             routed = self.run_skill(
                 "control-realtime-inspection",
-                session_id=session_id,
+                session_id=realtime_session_id,
                 arguments=realtime_event_arguments,
             )
             response = {
@@ -989,7 +992,7 @@ class AgentService:
                 realtime_arguments["source_id"] = resolved_context["source_id"]
             routed = self.run_skill(
                 "control-realtime-inspection",
-                session_id=session_id,
+                session_id=realtime_session_id,
                 arguments=realtime_arguments,
             )
             response = {
@@ -1010,7 +1013,7 @@ class AgentService:
                 alarm_arguments["task_id"] = resolved_context["task_id"]
             routed = self.run_skill(
                 "control-alarm",
-                session_id=session_id,
+                session_id=realtime_session_id,
                 arguments=alarm_arguments,
             )
             response = {
