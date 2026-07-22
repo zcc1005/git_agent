@@ -1,0 +1,70 @@
+<section
+  class="agent-chat"
+  data-agent-chat
+  data-mode="agent"
+  data-endpoint="/api/agent/chat"
+  data-history-endpoint="/api/agent/history"
+  data-monitoring-start-endpoint="/api/agent/monitoring/start"
+  data-monitoring-stop-endpoint="/api/agent/monitoring/stop"
+  data-monitoring-status-endpoint="/api/agent/monitoring/status"
+  data-monitoring-events-endpoint="/api/agent/monitoring/events"
+  aria-labelledby="agentChatTitle"
+>
+  <header class="agent-chat__header">
+    <div>
+      <h2 id="agentChatTitle">智能巡检助手</h2>
+      <p>理解巡检目标，调用检测、风险研判、历史查询和报警控制能力。</p>
+    </div>
+    <span class="agent-chat__status" data-agent-status>待命</span>
+  </header>
+
+  <section class="agent-chat__monitoring" data-agent-monitoring hidden aria-live="polite">
+    <div class="agent-chat__monitoring-head">
+      <strong>实时监控状态</strong>
+      <button type="button" data-agent-monitoring-stop hidden>停止监控</button>
+    </div>
+    <div class="agent-chat__monitoring-grid">
+      <span>连接</span><strong data-agent-monitoring-connection>未监控</strong>
+      <span>当前片段</span><strong data-agent-monitoring-segment>—</strong>
+      <span>检测进度</span><strong data-agent-monitoring-progress>—</strong>
+      <span>最新报警</span><strong data-agent-monitoring-alarm>—</strong>
+      <span>停止原因</span><strong data-agent-monitoring-reason>—</strong>
+    </div>
+    <div class="agent-chat__monitoring-progress" aria-hidden="true">
+      <span data-agent-monitoring-progress-bar></span>
+    </div>
+  </section>
+
+  <div class="agent-chat__messages" data-agent-messages aria-live="polite">
+    <article class="agent-chat__message agent-chat__message--assistant" aria-label="智能体消息">
+      <p>我已待命。你可以上传现场图片或视频，也可以直接查询风险、报告和历史记录。</p>
+    </article>
+  </div>
+
+  <div class="agent-chat__quick-actions" aria-label="快捷指令">
+    <button type="button" data-agent-prompt="检测这张图片">检测这张图片</button>
+    <button type="button" data-agent-prompt="检测这段视频">检测这段视频</button>
+    <button type="button" data-agent-prompt="查询上一轮结果">上一轮结果</button>
+    <button type="button" data-agent-prompt="今天有几次高风险报警">今日高风险</button>
+    <button type="button" data-agent-prompt="生成今日风险报告">今日风险报告</button>
+  </div>
+
+  <form class="agent-chat__composer" data-agent-form>
+    <label class="agent-chat__attachment" title="选择待检测图片或视频">
+      <input type="file" name="media" accept="image/*,video/*,.avi,.mkv,.flv,.wmv,.mpeg,.mpg">
+      <span aria-hidden="true">＋</span>
+      <span class="agent-chat__attachment-label">附件</span>
+    </label>
+    <label class="agent-chat__input-wrap">
+      <span class="sr-only">聊天消息</span>
+      <textarea
+        name="message"
+        rows="1"
+        placeholder="输入指令，或直接发送待检测图片/视频"
+        autocomplete="off"
+      ></textarea>
+    </label>
+    <button class="agent-chat__send" type="submit">发送</button>
+  </form>
+  <p class="agent-chat__file" data-agent-file></p>
+</section>

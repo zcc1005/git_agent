@@ -1,0 +1,4 @@
+interface:
+  display_name: "视频异物检测"
+  short_description: "按抽帧频率、检测阈值和ROI识别视频异物事件及风险"
+  default_prompt: "Use $detect-video to inspect the provided belt video with explicit sampling and ROI settings."

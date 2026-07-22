@@ -1,0 +1,4 @@
+interface:
+  display_name: "巡检任务编排"
+  short_description: "编排图片或视频检测、风险研判、历史入库与报警创建流程"
+  default_prompt: "Use $run-inspection-task to run the complete inspection workflow for one media source."

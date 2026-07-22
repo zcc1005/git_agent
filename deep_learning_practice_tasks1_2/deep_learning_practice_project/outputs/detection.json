@@ -1,14 +1,23 @@
 {
   "status": "detected",
-  "timestamp": "2026-07-15 09:17:38",
-  "source": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_091736_221866_1790-boardcamera_iron_ore_canga_png.rf.73ed2da290348cce9e286bf8cc29e4da.jpg",
+  "timestamp": "2026-07-16 17:10:21",
+  "source": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260716_171017_494713_1861-boardcamera_iron_ore_canga3_png.rf.bd3d49755788a689788e9f024babe912.jpg",
   "model_path": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\runs\\yolo\\yiwu_yolov8s_4class\\weights\\best.pt",
   "thresholds": {
-    "detection_min_confidence": 0.15,
-    "known_class_min_confidence": 0.4
+    "detection_min_confidence": 0.25,
+    "known_class_min_confidence": 0.4,
+    "nms_iou": 0.4,
+    "duplicate_iou": 0.45,
+    "duplicate_containment": 0.8,
+    "cross_class_iou": 0.7,
+    "cross_class_containment": 0.92,
+    "max_area_ratio": 0.65
   },
   "num_images": 1,
-  "num_detections": 3,
+  "num_raw_detections": 1,
+  "num_detections": 1,
+  "num_candidates": 0,
+  "num_ignored": 0,
   "has_yiwu": true,
   "has_foreign_object": true,
   "class_names": [
@@ -26,64 +35,42 @@
     "yiwu": "未知异物"
   },
   "class_counts": {
-    "塑料异物": 1,
-    "石块异物": 2
+    "石块异物": 1
   },
+  "candidate_counts": {},
   "objects": [
     {
-      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_091736_221866_1790-boardcamera_iron_ore_canga_png.rf.73ed2da290348cce9e286bf8cc29e4da.jpg",
-      "class_id": 1,
-      "class": "plastic",
-      "class_name": "塑料异物",
-      "confidence": 0.9721,
-      "rejected_as_unknown": false,
-      "predicted_class_id": 1,
-      "predicted_class": "plastic",
-      "predicted_class_name": "塑料异物",
-      "bbox_xyxy": [
-        82.36,
-        218.6,
-        652.88,
-        501.52
-      ],
-      "area": 161410.82
-    },
-    {
-      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_091736_221866_1790-boardcamera_iron_ore_canga_png.rf.73ed2da290348cce9e286bf8cc29e4da.jpg",
-      "class_id": 0,
-      "class": "stone",
-      "class_name": "石块异物",
-      "confidence": 0.8455,
-      "rejected_as_unknown": false,
+      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260716_171017_494713_1861-boardcamera_iron_ore_canga3_png.rf.bd3d49755788a689788e9f024babe912.jpg",
+      "confidence": 0.8093,
       "predicted_class_id": 0,
       "predicted_class": "stone",
       "predicted_class_name": "石块异物",
       "bbox_xyxy": [
-        831.16,
-        244.95,
-        1051.44,
-        424.52
+        11.49,
+        289.6,
+        329.64,
+        506.34
       ],
-      "area": 39554.0
-    },
-    {
-      "image": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\web_inputs\\20260715_091736_221866_1790-boardcamera_iron_ore_canga_png.rf.73ed2da290348cce9e286bf8cc29e4da.jpg",
+      "area": 68955.83,
       "class_id": 0,
       "class": "stone",
       "class_name": "石块异物",
-      "confidence": 0.5902,
       "rejected_as_unknown": false,
-      "predicted_class_id": 0,
-      "predicted_class": "stone",
-      "predicted_class_name": "石块异物",
-      "bbox_xyxy": [
-        684.02,
-        219.3,
-        816.3,
-        342.8
-      ],
-      "area": 16336.2
+      "detection_state": "confirmed_known",
+      "alarm_eligible": true
     }
   ],
+  "candidate_objects": [],
+  "ignored_objects": [],
+  "inference_parameters": {
+    "imgsz": 800,
+    "agnostic_nms": false,
+    "confirm_low_confidence_unknown": false
+  },
+  "notes": {
+    "objects": "达到确认阈值并参与报警的检测框",
+    "candidate_objects": "低置信度待确认框，仅用于调试，不触发报警",
+    "ignored_objects": "被重复框或几何规则过滤的调试框"
+  },
   "visualization_dir": "F:\\desk\\git\\deep_learning_practice_tasks1_2\\deep_learning_practice_project\\outputs\\detections_vis"
 }

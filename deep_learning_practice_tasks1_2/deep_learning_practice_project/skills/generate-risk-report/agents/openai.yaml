@@ -1,0 +1,4 @@
+interface:
+  display_name: "风险报告"
+  short_description: "按日期或筛选条件汇总检测、风险、报警、异物与闭环状态"
+  default_prompt: "Use $generate-risk-report to produce a filtered operational risk summary."

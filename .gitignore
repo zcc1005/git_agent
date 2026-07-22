@@ -22,12 +22,21 @@ ENV/
 
 # Deep learning datasets and generated artifacts
 deep_learning_practice_tasks1_2/deep_learning_practice_project/data/*
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/data/demo/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/data/demo/*
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/data/demo/README.md
 !deep_learning_practice_tasks1_2/deep_learning_practice_project/data/yolo_yiwu/
 !deep_learning_practice_tasks1_2/deep_learning_practice_project/data/yolo_yiwu/**
 !deep_learning_practice_tasks1_2/deep_learning_practice_project/data/yolo_unknown_eval/
 !deep_learning_practice_tasks1_2/deep_learning_practice_project/data/yolo_unknown_eval/**
 deep_learning_practice_tasks1_2/deep_learning_practice_project/outputs/
 deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/
+
+# Machine-specific project configuration
+deep_learning_practice_tasks1_2/deep_learning_practice_project/config/local.yaml
+deep_learning_practice_tasks1_2/deep_learning_practice_project/config/*.local.yaml
+deep_learning_practice_tasks1_2/deep_learning_practice_project/.local/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/.local/
 
 # Model weights, checkpoints, and serialized training outputs
 *.pt
@@ -67,3 +76,13 @@ desktop.ini
 deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/*
 !deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/
 !deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/**
+
+# Final safeguard: YOLO run metadata may be versioned, but never add model binaries.
+# Keep already-downloaded/previously-tracked weights on disk; this rule applies to
+# newly created or newly added model files.
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.engine

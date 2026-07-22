@@ -1,0 +1,4 @@
+interface:
+  display_name: "图片异物检测"
+  short_description: "检测皮带图片异物并输出位置、置信度、候选目标与风险结果"
+  default_prompt: "Use $detect-image to detect foreign objects in the provided belt image."

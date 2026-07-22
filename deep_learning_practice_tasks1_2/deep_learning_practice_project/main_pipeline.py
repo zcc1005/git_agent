@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -10,10 +9,7 @@ from typing import Any, Dict
 
 
 from project_config import (
-    ALARM_ADAPTER_DIR,
     PROJECT_ROOT,
-    QWEN_MODEL_NAME,
-    SPEECH_CKPT_PATH,
     YOLO_MODEL_PATH,
     resolve_project_path,
 )
@@ -22,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from task2_yolo.detect_yolo import detect_yiwu, make_skipped_json, read_command, should_start_detection
+from task3_alarm.alarm_rule_engine import complete_detection_alarm
 
 
 COMMAND_MEANINGS = {
@@ -32,14 +29,11 @@ COMMAND_MEANINGS = {
 }
 
 COMMAND_JSON = PROJECT_ROOT / "outputs" / "command.json"
-MIC_COMMAND_WAV = PROJECT_ROOT / "outputs" / "mic_command.wav"
 DETECTION_JSON = PROJECT_ROOT / "outputs" / "detection.json"
 ALARM_REPORT = PROJECT_ROOT / "outputs" / "alarm_report.txt"
+IMAGE_UNIFIED_ALARM = PROJECT_ROOT / "outputs" / "unified_alarm_image.json"
 DEFAULT_SOURCE = PROJECT_ROOT / "data" / "yolo_yiwu" / "images" / "test"
 DEFAULT_YOLO_MODEL = YOLO_MODEL_PATH
-DEFAULT_SPEECH_CKPT = SPEECH_CKPT_PATH
-DEFAULT_ADAPTER_DIR = ALARM_ADAPTER_DIR
-DEFAULT_QWEN_MODEL = QWEN_MODEL_NAME
 
 
 def display_path(path: Path) -> str:
@@ -68,71 +62,11 @@ def write_manual_command(command: str) -> Path:
     return COMMAND_JSON
 
 
-def record_microphone(wav_path: Path, seconds: float = 1.5, sample_rate: int = 16000) -> Path:
-    try:
-        import sounddevice as sd
-        from scipy.io.wavfile import write as write_wav
-    except ImportError as exc:
-        raise RuntimeError(
-            "缺少麦克风录音依赖，请先安装：pip install sounddevice scipy"
-        ) from exc
-
-    wav_path.parent.mkdir(parents=True, exist_ok=True)
-    num_samples = int(seconds * sample_rate)
-    if num_samples <= 0:
-        raise ValueError("录音时长必须大于 0 秒")
-
-    try:
-        audio = sd.rec(num_samples, samplerate=sample_rate, channels=1, dtype="float32")
-        sd.wait()
-    except Exception as exc:
-        raise RuntimeError(f"麦克风录音失败：{exc}") from exc
-
-    audio_int16 = (audio.clip(-1.0, 1.0) * 32767).astype("int16")
-    write_wav(wav_path, sample_rate, audio_int16)
-    return wav_path
-
-
-def run_speech_prediction(
-    project_root: Path,
-    wav_path: Path,
-    speech_ckpt: Path,
-    command_json: Path,
-) -> Path:
-    script_path = project_root / "task1_speech" / "predict_command.py"
-    if not script_path.exists():
-        raise FileNotFoundError(f"未找到语音识别脚本：{script_path}")
-    if not speech_ckpt.exists():
-        raise FileNotFoundError(
-            f"未找到语音识别模型：{speech_ckpt}\n"
-            "请先运行 task1_speech/train_speech_transformer.py"
-        )
-
-    command_json.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        sys.executable,
-        str(script_path),
-        "--wav",
-        display_path(wav_path),
-        "--ckpt",
-        display_path(speech_ckpt),
-        "--output",
-        display_path(command_json),
-    ]
-    try:
-        subprocess.run(cmd, cwd=project_root, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise RuntimeError(f"语音命令识别失败，退出码：{exc.returncode}") from exc
-    if not command_json.exists():
-        raise FileNotFoundError(f"语音识别未生成 command.json：{command_json}")
-    return command_json
-
-
 def load_existing_command() -> Dict[str, Any]:
     if not COMMAND_JSON.exists():
         raise FileNotFoundError(
             f"未找到已有 command.json：{COMMAND_JSON}\n"
-            "请先运行任务一，或直接使用：python main_pipeline.py --command go"
+            "请先生成手动控制命令，或直接使用：python main_pipeline.py --command go"
         )
     command = read_command(COMMAND_JSON)
     if not command:
@@ -141,25 +75,24 @@ def load_existing_command() -> Dict[str, Any]:
 
 
 def write_skipped_alarm_report(command: Dict[str, Any]) -> None:
-    cmd = str(command.get("command", "")).lower().strip() or "unknown"
-    meaning = command.get("meaning") or COMMAND_MEANINGS.get(cmd, "未知命令")
-    text = (
-        "工业皮带异物报警报告\n\n"
-        "一、报警结论\n"
-        f"当前命令为 {cmd} / {meaning}，系统未启动异物检测流程。\n\n"
-        "二、风险等级\n"
-        "未检测\n\n"
-        "三、目标信息\n"
-        "本次未执行 YOLO 异物检测，因此没有新的检测目标信息。\n\n"
-        "四、风险说明\n"
-        "由于检测流程未启动，系统无法基于当前图像判断皮带上是否存在异物风险。\n\n"
-        "五、处理建议\n"
-        "如需开始检测，请输入或识别 go 命令后重新运行流程。"
+    del command  # 命令详情已保存在 detection.json 中，此处保持旧函数签名兼容网页调用。
+    generate_rule_alarm_report()
+
+
+def generate_rule_alarm_report() -> Dict[str, Any]:
+    detection = read_detection_summary(DETECTION_JSON)
+    if not detection:
+        raise FileNotFoundError(f"未找到有效 detection.json：{DETECTION_JSON}")
+    ruled, _ = complete_detection_alarm(
+        detection,
+        input_json=DETECTION_JSON,
+        output_json=IMAGE_UNIFIED_ALARM,
+        output_txt=ALARM_REPORT,
+        source_type="image",
     )
-    ALARM_REPORT.parent.mkdir(parents=True, exist_ok=True)
-    with ALARM_REPORT.open("w", encoding="utf-8") as f:
-        f.write(text + "\n")
+    print(f"统一报警 JSON 已生成：{display_path(IMAGE_UNIFIED_ALARM)}")
     print(f"alarm_report.txt 已生成：{display_path(ALARM_REPORT)}")
+    return ruled
 
 
 def read_detection_summary(path: Path) -> Dict[str, Any]:
@@ -192,30 +125,8 @@ def validate_detection_inputs(source: Path, yolo_model: Path) -> None:
         raise FileNotFoundError(f"未找到待检测图片或文件夹：{source}")
 
 
-def validate_lora_adapter(adapter_dir: Path) -> None:
-    if not adapter_dir.exists():
-        raise FileNotFoundError(
-            f"未找到 LoRA adapter，请先运行 task3_alarm/train_lora_qwen.py\nadapter 路径：{adapter_dir}"
-        )
-    if not (adapter_dir / "adapter_config.json").exists() or not (
-        adapter_dir / "adapter_model.safetensors"
-    ).exists():
-        raise FileNotFoundError(
-            f"LoRA adapter 文件不完整，请先运行 task3_alarm/train_lora_qwen.py\nadapter 路径：{adapter_dir}"
-        )
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="工业皮带异物检测与智能报警系统一键流程")
-    parser.add_argument("--mic", action="store_true", help="使用麦克风语音输入命令")
-    parser.add_argument("--record_seconds", type=float, default=1.5, help="麦克风录音时长，默认 1.5 秒")
-    parser.add_argument("--sample_rate", type=int, default=16000, help="麦克风采样率，默认 16000")
-    parser.add_argument(
-        "--speech_ckpt",
-        type=Path,
-        default=DEFAULT_SPEECH_CKPT,
-        help="语音识别模型路径，默认 runs/speech_transformer/best_model.pt",
-    )
     parser.add_argument(
         "--command",
         choices=["go", "stop", "yes", "no"],
@@ -244,8 +155,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--conf",
         type=float,
-        default=0.15,
-        help="YOLO 最低检测阈值，低于该值忽略",
+        default=0.25,
+        help="YOLO 最低检测阈值，低于该值忽略（默认 0.25）",
     )
     parser.add_argument(
         "--known-conf",
@@ -253,34 +164,9 @@ def parse_args() -> argparse.Namespace:
         dest="known_conf",
         type=float,
         default=0.40,
-        help="已知类别阈值，conf 到该值之间输出 unknown",
-    )
-    parser.add_argument(
-        "--adapter_dir",
-        "--lora_adapter",
-        dest="adapter_dir",
-        type=Path,
-        default=DEFAULT_ADAPTER_DIR,
-        help="LoRA adapter 路径，默认 outputs/task3_alarm/qwen_alarm_lora",
+        help="类别确认阈值，conf 到该值之间作为待确认候选，不触发报警",
     )
     parser.add_argument("--skip_alarm", action="store_true", help="只运行到 detection.json，不生成报警文本")
-    parser.add_argument("--top_k", type=int, default=5, help="送入报警生成模型的目标数量")
-    parser.add_argument(
-        "--qwen_model",
-        default=DEFAULT_QWEN_MODEL,
-        help="Qwen 基础模型名称或本地路径",
-    )
-    parser.add_argument(
-        "--qwen_device",
-        choices=["auto", "cuda", "cpu"],
-        default="cpu",
-        help="Qwen 推理设备，默认 cpu；如需自动使用 GPU 可设为 auto",
-    )
-    parser.add_argument(
-        "--run_alarm",
-        action="store_true",
-        help=argparse.SUPPRESS,
-    )
     return parser.parse_args()
 
 
@@ -288,24 +174,11 @@ def main() -> None:
     args = parse_args()
     source = resolve_project_path(args.source)
     yolo_model = resolve_project_path(args.yolo_model)
-    speech_ckpt = resolve_project_path(args.speech_ckpt)
-    adapter_dir = resolve_project_path(args.adapter_dir)
 
     print("========== 工业皮带异物检测与智能报警系统 ==========")
     print(f"项目根目录：{PROJECT_ROOT}")
 
-    if args.mic:
-        print("\n[任务1] 麦克风语音命令识别")
-        print(f"请在 {args.record_seconds:g} 秒内说出命令：go / stop / yes / no")
-        record_microphone(MIC_COMMAND_WAV, args.record_seconds, args.sample_rate)
-        print(f"录音已保存：{display_path(MIC_COMMAND_WAV)}")
-        print("开始识别语音命令...")
-        command_path = run_speech_prediction(PROJECT_ROOT, MIC_COMMAND_WAV, speech_ckpt, COMMAND_JSON)
-        print(f"command.json 已生成：{display_path(command_path)}")
-        command = read_command(COMMAND_JSON)
-        if not command:
-            raise ValueError(f"command.json 为空或读取失败：{COMMAND_JSON}")
-    elif args.use_existing_command:
+    if args.use_existing_command:
         print("当前模式：使用已有 command.json")
         command = load_existing_command()
     else:
@@ -351,19 +224,9 @@ def main() -> None:
         print("\n========== 流程完成 ==========")
         return
 
-    print("\n[任务3] 开始执行 LoRA-Qwen 报警文本生成...")
-    validate_lora_adapter(adapter_dir)
-    from task3_alarm.generate_alarm_qwen_lora import generate_alarm_report
-
-    generate_alarm_report(
-        detection_json=DETECTION_JSON,
-        adapter_dir=adapter_dir,
-        output_txt=ALARM_REPORT,
-        model_name_or_path=args.qwen_model,
-        top_k=args.top_k,
-        qwen_device=args.qwen_device,
-    )
-    print(f"alarm_report.txt 已生成：{display_path(ALARM_REPORT)}")
+    print("\n[任务3] 开始执行统一报警转换与确定性规则评估...")
+    ruled = generate_rule_alarm_report()
+    print(f"总体风险：{ruled['overall_risk']['level']}")
     print("\n========== 流程完成 ==========")
 
 

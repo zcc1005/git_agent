@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "timezone": "Asia/Shanghai",
+  "sources": [
+    {
+      "source_id": "main-monitor",
+      "display_name": "皮带主监控",
+      "source_kind": "rtsp",
+      "video_path": "",
+      "started_at": null,
+      "line_id": "main-line",
+      "zones": [],
+      "manifest_path": "",
+      "resolution": null,
+      "duration_seconds": null,
+      "segments": [],
+      "stream": {
+        "url_env": "MAIN_MONITOR_RTSP_URL",
+        "transport": "tcp",
+        "capture_window_seconds": 60,
+        "segment_seconds": 60,
+        "reconnect_seconds": 5.0,
+        "connect_timeout_seconds": 10.0,
+        "read_timeout_seconds": 15.0
+      }
+    }
+  ]
+}

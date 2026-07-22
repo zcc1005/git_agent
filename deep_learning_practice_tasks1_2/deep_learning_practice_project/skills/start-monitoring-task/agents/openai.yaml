@@ -1,0 +1,4 @@
+interface:
+  display_name: "启动监控任务"
+  short_description: "创建最长二十四小时的有限时段 RTSP 后台监控任务"
+  default_prompt: "使用 $start-monitoring-task 为已注册 RTSP 视频源安排一段有限时长的监控。"
