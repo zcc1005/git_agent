@@ -95,6 +95,20 @@
             <span>当前安全</span><h3>没有可处置的报警</h3><p>在智能体工作台上传图片或视频并发出检测命令，风险结果会自动汇总到这里。</p><button type="button" class="primary-button compact" data-view-target="dashboard" data-agent-prompt="开始一次异物检测">返回智能体工作台</button>
           </div>
           <div id="alarmCenterContent" class="alarm-detail-layout" hidden>
+            <div class="alarm-browser" aria-label="报警事件浏览器">
+              <div id="alarmRiskFilters" class="alarm-risk-filters" aria-label="按风险等级筛选">
+                <button type="button" class="active" data-alarm-risk-filter="all">全部 <span>0</span></button>
+                <button type="button" data-alarm-risk-filter="high">高风险 <span>0</span></button>
+                <button type="button" data-alarm-risk-filter="medium">中风险 <span>0</span></button>
+                <button type="button" data-alarm-risk-filter="low">低风险 <span>0</span></button>
+              </div>
+              <div class="alarm-browser__navigation">
+                <button id="previousAlarmButton" type="button" class="secondary-button compact">上一条</button>
+                <strong id="alarmBrowserPosition">0 / 0</strong>
+                <button id="nextAlarmButton" type="button" class="secondary-button compact">下一条</button>
+                <button id="confirmAllAlarmsButton" type="button" class="primary-button compact">一键确认全部待处理报警</button>
+              </div>
+            </div>
             <article class="alarm-hero">
               <div class="alarm-hero__top"><div><span>当前报警</span><h3 id="alarmCenterTitle">异物风险事件</h3></div><span id="alarmCenterRisk" class="risk-badge risk-none">待评估</span></div>
               <p id="alarmCenterSummary">等待检测结果。</p>

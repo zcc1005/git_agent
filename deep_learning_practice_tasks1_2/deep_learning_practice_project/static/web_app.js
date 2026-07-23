@@ -7,8 +7,17 @@ const historySourceFilter = document.getElementById("historySourceFilter");
 const historyRiskFilter = document.getElementById("historyRiskFilter");
 
 const HISTORY_STORAGE_KEY = "belt-guard-front-history-v2";
+const AGENT_SESSION_STORAGE_KEY = "foreign-object-agent-session";
+const ALARM_RECONCILIATION_STORAGE_KEY = "belt-guard-alarm-reconciliation-v1";
+const CONSOLE_SNAPSHOT_ENDPOINT = "/api/console/snapshot";
+const CONSOLE_ALARM_ACTION_ENDPOINT = "/api/console/alarms/action";
 const RISK_NAMES = { none: "无报警", low: "低风险", medium: "中风险", high: "高风险" };
 const VIEW_NAMES = new Set(["dashboard", "alarms", "history"]);
+let selectedAlarmId = "";
+let alarmRiskFilter = "all";
+let currentDailySummary = null;
+let consoleSnapshotTimer = 0;
+let consoleSnapshotPolling = false;
 
 function setStatus(text, state = "") {
   statusBadge.replaceChildren();
@@ -244,11 +253,14 @@ function createAgentRecord(response, payload, risk) {
   const alarmStatus = String(payload.alarm_status || "").toLowerCase();
   return {
     id: String(payload.detection_id || `agent-${Date.now()}`),
+    detectionId: String(payload.detection_id || ""),
+    alarmId: String(payload.alarm_id || ""),
     createdAt: String(payload.created_at || new Date().toISOString()),
     sourceType: ["image", "video"].includes(sourceType) ? sourceType : "agent",
     sourceName,
     riskLevel: level,
     eventCount,
+    classCounts: classes,
     classSummary: formatClassCounts(classes),
     summary: String(response.reply || `${eventCount} 个事件`),
     report: extractReport(payload) || String(response.reply || ""),
@@ -274,11 +286,14 @@ function createRealtimeEventRecord(event, task = {}) {
   const frame = String(event.representative_frame || event.image_path || "");
   return {
     id: String(event.detection_id || `realtime-${event.task_id}-${event.event_id}`),
+    detectionId: String(event.detection_id || ""),
+    alarmId: String(event.alarm_id || ""),
     createdAt: String(event.detected_at || event.created_at || new Date().toISOString()),
     sourceType: "agent",
     sourceName: `${source}实时巡检`,
     riskLevel: normalizeRisk(event.risk_level),
     eventCount: 1,
+    classCounts,
     classSummary: formatClassCounts(classCounts),
     summary: `实时巡检发现 ${formatClassCounts(classCounts)}`,
     report: String(event.alarm_report?.text || event.alarm_report || ""),
@@ -311,7 +326,7 @@ function loadHistoryRecords() {
 
 function writeHistoryRecords(records) {
   try {
-    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(records.slice(0, 40)));
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(records.slice(0, 200)));
   } catch (_error) {
     // Conversation and detection remain available without local history.
   }
@@ -322,12 +337,6 @@ function saveHistoryRecord(record) {
   records.unshift(record);
   writeHistoryRecords(records);
   renderAll(records);
-}
-
-function latestAlarmRecord(records = loadHistoryRecords()) {
-  return records.find((record) => record.riskLevel !== "none" && record.actionStatus === "pending")
-    || records.find((record) => record.riskLevel !== "none")
-    || null;
 }
 
 function formatRecordTime(value, includeDate = true) {
@@ -350,15 +359,20 @@ function actionStatusName(status) {
   return { inactive: "无需报警", pending: "待确认", confirmed: "已确认", cancelled: "已取消" }[status] || "待复核";
 }
 
-function renderDashboard(records) {
+function renderDashboard(records, dailySummary = currentDailySummary) {
   const today = new Date().toDateString();
   const todayRecords = records.filter((record) => new Date(record.createdAt).toDateString() === today);
   const pending = records.filter((record) => record.riskLevel !== "none" && record.actionStatus === "pending");
-  document.getElementById("todayRunCount").textContent = String(todayRecords.length);
-  document.getElementById("todayHighRiskCount").textContent = String(todayRecords.filter((record) => record.riskLevel === "high").length);
-  document.getElementById("pendingAlarmCount").textContent = String(pending.length);
-  document.getElementById("sidebarAlarmCount").textContent = String(pending.length);
-  document.getElementById("dashboardAlertCount").textContent = `${pending.length} 项`;
+  const serverRisks = dailySummary?.risk_counts || {};
+  const serverStatuses = dailySummary?.alarm_status_counts || dailySummary?.status_counts || {};
+  const runCount = Number(dailySummary?.detection_count ?? todayRecords.length);
+  const highRiskCount = Number(serverRisks.high ?? todayRecords.filter((record) => record.riskLevel === "high").length);
+  const pendingCount = Number(serverStatuses.pending ?? pending.length);
+  document.getElementById("todayRunCount").textContent = String(runCount);
+  document.getElementById("todayHighRiskCount").textContent = String(highRiskCount);
+  document.getElementById("pendingAlarmCount").textContent = String(pendingCount);
+  document.getElementById("sidebarAlarmCount").textContent = String(pendingCount);
+  document.getElementById("dashboardAlertCount").textContent = `${pendingCount} 项`;
   document.getElementById("latestRiskLabel").textContent = records[0] ? RISK_NAMES[records[0].riskLevel] : "安全";
 
   const alertEmpty = document.getElementById("dashboardAlertEmpty");
@@ -402,12 +416,62 @@ function renderDashboard(records) {
   });
 }
 
-function renderAlarmCenter(record) {
+function alarmCenterRecords(records) {
+  return records.filter((record) => (
+    record.riskLevel !== "none"
+    && (alarmRiskFilter === "all" || record.riskLevel === alarmRiskFilter)
+  ));
+}
+
+function selectedAlarmRecord(records) {
+  let filtered = alarmCenterRecords(records);
+  if (!filtered.length && alarmRiskFilter !== "all") {
+    alarmRiskFilter = "all";
+    filtered = alarmCenterRecords(records);
+  }
+  let record = filtered.find((item) => item.id === selectedAlarmId) || null;
+  if (!record && filtered.length) {
+    record = filtered[0];
+    selectedAlarmId = record.id;
+  }
+  return { record, filtered };
+}
+
+function renderAlarmRiskFilters(records) {
+  const riskRecords = records.filter((record) => record.riskLevel !== "none");
+  document.querySelectorAll("[data-alarm-risk-filter]").forEach((button) => {
+    const risk = String(button.dataset.alarmRiskFilter || "all");
+    const count = risk === "all"
+      ? riskRecords.length
+      : riskRecords.filter((record) => record.riskLevel === risk).length;
+    button.classList.toggle("active", risk === alarmRiskFilter);
+    const countNode = button.querySelector("span");
+    if (countNode) countNode.textContent = String(count);
+    button.disabled = count === 0;
+  });
+}
+
+function renderAlarmCenter(records) {
+  const { record, filtered } = selectedAlarmRecord(records);
+  renderAlarmRiskFilters(records);
   const empty = document.getElementById("alarmCenterEmpty");
   const content = document.getElementById("alarmCenterContent");
   empty.hidden = Boolean(record);
   content.hidden = !record;
   if (!record) return;
+
+  const position = Math.max(0, filtered.findIndex((item) => item.id === record.id));
+  document.getElementById("alarmBrowserPosition").textContent = `${position + 1} / ${filtered.length}`;
+  document.getElementById("previousAlarmButton").disabled = filtered.length < 2;
+  document.getElementById("nextAlarmButton").disabled = filtered.length < 2;
+  const pendingCount = records.filter((item) => (
+    item.riskLevel !== "none" && item.actionStatus === "pending"
+  )).length;
+  const confirmAllButton = document.getElementById("confirmAllAlarmsButton");
+  confirmAllButton.disabled = pendingCount === 0;
+  confirmAllButton.textContent = pendingCount
+    ? `一键确认全部待处理报警（${pendingCount}）`
+    : "没有待处理报警";
 
   document.getElementById("alarmCenterTitle").textContent = record.sourceName;
   document.getElementById("alarmCenterSummary").textContent = record.reason || record.summary;
@@ -482,26 +546,127 @@ function renderHistory(records = loadHistoryRecords()) {
 }
 
 function renderAll(records = loadHistoryRecords()) {
-  renderDashboard(records);
-  renderAlarmCenter(latestAlarmRecord(records));
+  renderDashboard(records, currentDailySummary);
+  renderAlarmCenter(records);
   renderHistory(records);
 }
 
-async function sendAlarmAction(action) {
-  const body = new FormData();
-  body.append("action", action);
-  setStatus(action === "yes" ? "确认报警" : "取消报警", "running");
+function applyConsoleSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return;
+  currentDailySummary = snapshot.summary && typeof snapshot.summary === "object"
+    ? snapshot.summary
+    : currentDailySummary;
+  const localRecords = loadHistoryRecords();
+  const localById = new Map(localRecords.map((record) => [String(record.id), record]));
+  const serverRecords = Array.isArray(snapshot.records) ? snapshot.records : [];
+  const merged = serverRecords.map((serverRecord) => {
+    const local = localById.get(String(serverRecord.id)) || {};
+    localById.delete(String(serverRecord.id));
+    const classCounts = serverRecord.classCounts || local.classCounts || {};
+    return {
+      ...local,
+      ...serverRecord,
+      sourceName: local.sourceName && local.sourceName !== "智能体任务"
+        ? local.sourceName
+        : serverRecord.sourceName,
+      classCounts,
+      classSummary: formatClassCounts(classCounts),
+      imageUrl: serverRecord.imageUrl || local.imageUrl || "",
+      report: serverRecord.report || local.report || "",
+      reason: serverRecord.reason || local.reason || "",
+    };
+  });
+  localById.forEach((record) => merged.push(record));
+  merged.sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+  writeHistoryRecords(merged);
+  renderAll(merged);
+}
+
+function scheduleConsoleSnapshot(delay = 3000) {
+  window.clearTimeout(consoleSnapshotTimer);
+  consoleSnapshotTimer = window.setTimeout(() => refreshConsoleSnapshot(), delay);
+}
+
+async function refreshConsoleSnapshot() {
+  if (consoleSnapshotPolling) {
+    scheduleConsoleSnapshot(250);
+    return;
+  }
+  consoleSnapshotPolling = true;
   try {
-    const response = await fetch("/api/alarm_action", { method: "POST", body });
+    const response = await fetch(`${CONSOLE_SNAPSHOT_ENDPOINT}?limit=200`, { cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.ok) applyConsoleSnapshot(data);
+  } catch (_error) {
+    // Local records remain usable while the authoritative snapshot is temporarily unavailable.
+  } finally {
+    consoleSnapshotPolling = false;
+    scheduleConsoleSnapshot(3000);
+  }
+}
+
+async function reconcileLegacyAlarmActions() {
+  if (localStorage.getItem(ALARM_RECONCILIATION_STORAGE_KEY) === "done") return;
+  const records = loadHistoryRecords();
+  const groups = {
+    confirm: records.filter((record) => record.actionStatus === "confirmed"),
+    cancel: records.filter((record) => record.actionStatus === "cancelled"),
+  };
+  try {
+    for (const [action, targets] of Object.entries(groups)) {
+      if (!targets.length) continue;
+      const response = await fetch(CONSOLE_ALARM_ACTION_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          reconcile_only: true,
+          session_id: localStorage.getItem(AGENT_SESSION_STORAGE_KEY) || "default",
+          detection_ids: targets.map((record) => record.detectionId || record.id).filter(Boolean),
+          note: "迁移旧版网页中已经完成的人工报警处置状态",
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.error || "旧状态同步失败");
+    }
+    localStorage.setItem(ALARM_RECONCILIATION_STORAGE_KEY, "done");
+  } catch (_error) {
+    // Keep the marker unset so a later page load can retry the one-time migration.
+  }
+}
+
+async function sendAlarmAction(action, { allPending = false } = {}) {
+  const records = loadHistoryRecords();
+  const selected = records.find((record) => record.id === selectedAlarmId);
+  const targets = allPending
+    ? records.filter((record) => record.riskLevel !== "none" && record.actionStatus === "pending")
+    : selected && selected.actionStatus === "pending" ? [selected] : [];
+  if (!targets.length) return;
+  const actionName = action === "confirm" ? "确认报警" : "取消报警";
+  setStatus(allPending ? `${actionName}（${targets.length}条）` : actionName, "running");
+  try {
+    const response = await fetch(CONSOLE_ALARM_ACTION_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action,
+        all_pending: allPending,
+        session_id: localStorage.getItem(AGENT_SESSION_STORAGE_KEY) || "default",
+        alarm_ids: targets.map((record) => record.alarmId).filter(Boolean),
+        detection_ids: targets.map((record) => record.detectionId || record.id).filter(Boolean),
+        note: allPending ? "网页报警中心一键处置全部待处理报警" : "网页报警中心单条处置",
+      }),
+    });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.ok) throw new Error(data.error || "报警控制失败");
-    const records = loadHistoryRecords();
-    const target = records.find((record) => record.riskLevel !== "none" && record.actionStatus === "pending");
-    if (target) target.actionStatus = action === "yes" ? "confirmed" : "cancelled";
-    writeHistoryRecords(records);
-    renderAll(records);
-    setStatus(action === "yes" ? "已确认" : "已取消");
-    setAgentTask(action === "yes" ? "报警已确认" : "报警已取消", "本次报警处置已完成。");
+    if (data.snapshot) applyConsoleSnapshot(data.snapshot);
+    else scheduleConsoleSnapshot(0);
+    const affected = Number(data.affected_count || 0);
+    setStatus(action === "confirm" ? "已确认" : "已取消");
+    setAgentTask(
+      action === "confirm" ? "报警已确认" : "报警已取消",
+      `本次已处置 ${affected} 条报警，SQLite 与看板状态已同步。`,
+    );
   } catch (error) {
     setStatus("处置失败", "error");
     setAgentTask("处置失败", "报警处置未完成，请在聊天框中重试。");
@@ -509,11 +674,44 @@ async function sendAlarmAction(action) {
 }
 
 document.getElementById("confirmAlarmButton")?.addEventListener("click", () => {
-  if (window.confirm("确认继续当前报警？该操作将写入现有报警控制流程。")) sendAlarmAction("yes");
+  if (window.confirm("确认继续当前报警？该操作将同步写入 SQLite 报警记录。")) {
+    sendAlarmAction("confirm");
+  }
 });
 
 document.getElementById("cancelAlarmButton")?.addEventListener("click", () => {
-  if (window.confirm("确认取消当前报警？请仅在误报或风险已解除时操作。")) sendAlarmAction("no");
+  if (window.confirm("确认取消当前报警？请仅在误报或风险已经解除时操作。")) {
+    sendAlarmAction("cancel");
+  }
+});
+
+document.getElementById("confirmAllAlarmsButton")?.addEventListener("click", () => {
+  const pendingCount = loadHistoryRecords().filter((record) => (
+    record.riskLevel !== "none" && record.actionStatus === "pending"
+  )).length;
+  if (pendingCount && window.confirm(`确认一次性继续全部 ${pendingCount} 条待处理报警？`)) {
+    sendAlarmAction("confirm", { allPending: true });
+  }
+});
+
+function moveSelectedAlarm(offset) {
+  const records = loadHistoryRecords();
+  const { record, filtered } = selectedAlarmRecord(records);
+  if (!record || filtered.length < 2) return;
+  const currentIndex = filtered.findIndex((item) => item.id === record.id);
+  const nextIndex = (currentIndex + offset + filtered.length) % filtered.length;
+  selectedAlarmId = filtered[nextIndex].id;
+  renderAlarmCenter(records);
+}
+
+document.getElementById("previousAlarmButton")?.addEventListener("click", () => moveSelectedAlarm(-1));
+document.getElementById("nextAlarmButton")?.addEventListener("click", () => moveSelectedAlarm(1));
+document.querySelectorAll("[data-alarm-risk-filter]").forEach((button) => {
+  button.addEventListener("click", () => {
+    alarmRiskFilter = String(button.dataset.alarmRiskFilter || "all");
+    selectedAlarmId = "";
+    renderAlarmCenter(loadHistoryRecords());
+  });
 });
 
 historySourceFilter?.addEventListener("change", () => renderHistory());
@@ -521,3 +719,4 @@ historyRiskFilter?.addEventListener("change", () => renderHistory());
 
 dockAgentHome();
 renderAll();
+reconcileLegacyAlarmActions().finally(() => refreshConsoleSnapshot());

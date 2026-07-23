@@ -174,7 +174,6 @@ class AgentTools:
         # Flask 请求与后台监控线程共享模型实例时，串行化重型推理，
         # 避免同一进程内同时占用 GPU/模型状态。
         self._detection_lock = threading.RLock()
-        self._detection_lock = threading.RLock()
         self._monitoring_manager = monitoring_manager or MonitoringTaskManager(
             self.store,
             self.detect_video_source,

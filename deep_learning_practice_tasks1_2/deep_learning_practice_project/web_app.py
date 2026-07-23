@@ -452,6 +452,104 @@ def get_agent_service() -> AgentService:
     return service
 
 
+def get_console_history_store() -> SQLiteHistoryStore:
+    """Return the authoritative store used by the dashboard and alarm center."""
+    configured = app.config.get("AGENT_HISTORY_STORE")
+    return configured if isinstance(configured, SQLiteHistoryStore) else agent_history_store
+
+
+def _console_risk_reason(alarm: AlarmRecord | None) -> str:
+    if alarm is None:
+        return ""
+    document = alarm.report if isinstance(alarm.report, Mapping) else {}
+    events = [item for item in document.get("events") or [] if isinstance(item, Mapping)]
+    event_risk = events[0].get("risk") if events and isinstance(events[0].get("risk"), Mapping) else {}
+    overall = document.get("overall_risk") if isinstance(document.get("overall_risk"), Mapping) else {}
+    return str(event_risk.get("reason") or overall.get("reason") or "")
+
+
+def _console_source_name(record: Any) -> str:
+    source_path = str(record.source_path or "")
+    if record.source_type == "realtime" and source_path.startswith("realtime://"):
+        source_id = source_path.removeprefix("realtime://").split("/", 1)[0]
+        return f"{source_id or '监控源'}实时巡检"
+    filename = Path(source_path).name
+    if filename:
+        return filename
+    return {
+        "image": "图片检测",
+        "video": "视频检测",
+        "realtime": "实时巡检",
+    }.get(record.source_type, "智能体任务")
+
+
+def _console_record_payload(
+    store: SQLiteHistoryStore,
+    record: Any,
+    alarms_by_detection: Mapping[str, AlarmRecord] | None = None,
+) -> Dict[str, Any]:
+    detection = record.summary if isinstance(record.summary, Mapping) else {}
+    alarm = (
+        alarms_by_detection.get(record.id)
+        if alarms_by_detection is not None
+        else store.get_alarm_for_detection(record.id)
+    )
+    if record.source_type in {"video", "realtime"}:
+        event_frames = AgentTools.video_event_frames(dict(detection))
+        event_count = int(detection.get("num_events") or len(detection.get("events") or []))
+    else:
+        event_frames = AgentTools.image_event_frames(
+            dict(detection), str(detection.get("visualization_image") or "")
+        )
+        event_count = 1 if bool(
+            detection.get("has_foreign_object")
+            or int(detection.get("num_detections") or 0) > 0
+        ) else 0
+    representative_frame = str(event_frames[0].get("key_frame") or "") if event_frames else ""
+    source_type = "agent" if record.source_type == "realtime" else record.source_type
+    class_counts = dict(detection.get("class_counts") or {})
+    return {
+        "id": record.id,
+        "detectionId": record.id,
+        "alarmId": alarm.id if alarm is not None else "",
+        "createdAt": record.created_at,
+        "sourceType": source_type,
+        "sourceName": _console_source_name(record),
+        "riskLevel": record.risk_level,
+        "eventCount": event_count,
+        "classCounts": class_counts,
+        "summary": f"检测到 {event_count} 个异物事件",
+        "report": alarm.report_text if alarm is not None else record.alarm_report,
+        "imageUrl": representative_frame,
+        "actionStatus": alarm.status if alarm is not None else "inactive",
+        "reason": _console_risk_reason(alarm),
+        "lineId": record.line_id,
+    }
+
+
+def _console_snapshot_payload(*, limit: int = 200, target_date: str = "") -> Dict[str, Any]:
+    store = get_console_history_store()
+    day = (
+        datetime.strptime(target_date, "%Y-%m-%d").date()
+        if target_date
+        else datetime.now().astimezone().date()
+    )
+    records = store.query_detections(limit=limit)
+    alarms_by_detection = store.get_alarms_for_detections([record.id for record in records])
+    summary = store.daily_summary(day)
+    return {
+        "date": day.isoformat(),
+        "summary": {
+            **summary,
+            "alarm_status_counts": dict(summary.get("status_counts") or {}),
+        },
+        "records": [
+            _console_record_payload(store, record, alarms_by_detection)
+            for record in records
+        ],
+    }
+
+
 def enrich_alarm_report_data(data: Any) -> None:
     """Backfill rule-generated report text for chat messages saved before report rendering."""
     if not isinstance(data, dict):
@@ -749,6 +847,98 @@ def _monitoring_snapshot(
 @app.get("/")
 def index():
     return render_template("web_index.html")
+
+
+@app.get("/api/console/snapshot")
+def api_console_snapshot():
+    try:
+        limit = int(request.args.get("limit", "200"))
+        if not 1 <= limit <= 500:
+            raise ValueError("limit 必须在 1 到 500 之间")
+        target_date = str(request.args.get("date") or "").strip()
+        payload = _console_snapshot_payload(limit=limit, target_date=target_date)
+        return jsonify({"ok": True, **payload})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.post("/api/console/alarms/action")
+def api_console_alarm_action():
+    try:
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            raise ValueError("请求体必须是 JSON 对象")
+        unknown = sorted(set(payload) - {
+            "action", "alarm_ids", "detection_ids", "session_id", "note", "all_pending",
+            "reconcile_only",
+        })
+        if unknown:
+            raise ValueError(f"请求包含不支持的字段：{', '.join(unknown)}")
+        action = str(payload.get("action") or "").strip().lower()
+        action = {"yes": "confirm", "no": "cancel"}.get(action, action)
+        if action not in {"confirm", "cancel"}:
+            raise ValueError("action 只能是 confirm 或 cancel")
+        session_id = _monitoring_session_id(payload.get("session_id"))
+        alarm_ids = payload.get("alarm_ids") or []
+        detection_ids = payload.get("detection_ids") or []
+        if not isinstance(alarm_ids, list) or not isinstance(detection_ids, list):
+            raise ValueError("alarm_ids 和 detection_ids 必须是数组")
+        if len(alarm_ids) + len(detection_ids) > 500:
+            raise ValueError("单次最多处理 500 条报警")
+
+        store = get_console_history_store()
+        resolved_ids = [str(value).strip() for value in alarm_ids if str(value).strip()]
+        if bool(payload.get("all_pending")):
+            resolved_ids.extend(alarm.id for alarm in store.list_alarms(status="pending", limit=500))
+        detection_alarm_map = store.get_alarms_for_detections(
+            [str(detection_id).strip() for detection_id in detection_ids]
+        )
+        for detection_id in detection_ids:
+            alarm = detection_alarm_map.get(str(detection_id).strip())
+            if alarm is not None:
+                resolved_ids.append(alarm.id)
+        resolved_ids = list(dict.fromkeys(resolved_ids))
+        if not resolved_ids:
+            raise ValueError("没有提供可处理的报警")
+
+        pending_by_id = {
+            alarm.id: alarm for alarm in store.list_alarms(status="pending", limit=500)
+        }
+        pending = [pending_by_id[alarm_id] for alarm_id in resolved_ids if alarm_id in pending_by_id]
+        if pending and not bool(payload.get("reconcile_only")):
+            handler = app.config.get("ALARM_CONTROL_HANDLER", apply_agent_alarm_control)
+            if handler is not None:
+                handler(action, pending[0])
+        result = store.set_pending_alarm_actions(
+            resolved_ids,
+            session_id,
+            action,
+            note=str(payload.get("note") or "网页报警中心批量处置"),
+        )
+        updated_detections = [
+            pending_by_id[alarm_id].detection_id
+            for alarm_id in result["updated"]
+            if alarm_id in pending_by_id
+        ]
+        action_text = "确认" if action == "confirm" else "取消"
+        return jsonify({
+            "ok": True,
+            "message": f"已{action_text}{len(result['updated'])}条报警。",
+            "action": action,
+            "status": "confirmed" if action == "confirm" else "cancelled",
+            "affected_count": len(result["updated"]),
+            "unchanged_count": len(result["unchanged"]),
+            "missing_count": len(result["missing"]),
+            "alarm_ids": result["updated"],
+            "detection_ids": updated_detections,
+            "snapshot": _console_snapshot_payload(limit=200),
+        })
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @app.get("/outputs/<path:filename>")

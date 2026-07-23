@@ -1269,6 +1269,49 @@ class SQLiteHistoryStore:
             ).fetchone()
         return self._alarm_from_row(row) if row else None
 
+    def get_alarms_for_detections(
+        self, detection_ids: List[str]
+    ) -> Dict[str, AlarmRecord]:
+        normalized = list(dict.fromkeys(
+            str(detection_id).strip()
+            for detection_id in detection_ids
+            if str(detection_id).strip()
+        ))
+        result: Dict[str, AlarmRecord] = {}
+        with self._connect() as connection:
+            for offset in range(0, len(normalized), 900):
+                chunk = normalized[offset : offset + 900]
+                if not chunk:
+                    continue
+                placeholders = ",".join("?" for _ in chunk)
+                rows = connection.execute(
+                    f"SELECT * FROM alarms WHERE detection_id IN ({placeholders})",
+                    tuple(chunk),
+                ).fetchall()
+                for row in rows:
+                    alarm = self._alarm_from_row(row)
+                    result[alarm.detection_id] = alarm
+        return result
+
+    def list_alarms(
+        self, *, status: str = "", limit: int = 500
+    ) -> List[AlarmRecord]:
+        if limit < 1:
+            return []
+        normalized_status = str(status or "").strip().lower()
+        if normalized_status and normalized_status not in VALID_ALARM_STATUSES:
+            raise ValueError(f"不支持的报警状态：{status}")
+        query = "SELECT * FROM alarms"
+        parameters: List[Any] = []
+        if normalized_status:
+            query += " WHERE status = ?"
+            parameters.append(normalized_status)
+        query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+        parameters.append(min(int(limit), 500))
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(parameters)).fetchall()
+        return [self._alarm_from_row(row) for row in rows]
+
     def current_alarm(
         self,
         session_id: Optional[str] = None,
@@ -1341,6 +1384,64 @@ class SQLiteHistoryStore:
                 "SELECT * FROM alarms WHERE id = ?", (alarm_id,)
             ).fetchone()
         return self._alarm_from_row(updated)
+
+    def set_pending_alarm_actions(
+        self,
+        alarm_ids: List[str],
+        session_id: str,
+        action: str,
+        note: str = "",
+    ) -> Dict[str, List[str]]:
+        """Atomically confirm or cancel multiple pending alarms.
+
+        Existing terminal alarm states are intentionally left unchanged so a bulk
+        operation cannot silently reverse a previous human decision.
+        """
+        action = action.lower().strip()
+        if action not in VALID_ALARM_ACTIONS:
+            raise ValueError(f"不支持的报警动作：{action}")
+        normalized_ids = list(dict.fromkeys(
+            str(alarm_id).strip() for alarm_id in alarm_ids if str(alarm_id).strip()
+        ))
+        if not normalized_ids:
+            return {"updated": [], "unchanged": [], "missing": []}
+        if len(normalized_ids) > 500:
+            raise ValueError("单次最多处理 500 条报警")
+
+        self.ensure_session(session_id)
+        timestamp = self._timestamp()
+        new_status = "confirmed" if action == "confirm" else "cancelled"
+        updated_ids: List[str] = []
+        unchanged_ids: List[str] = []
+        missing_ids: List[str] = []
+        with self._connect() as connection:
+            for alarm_id in normalized_ids:
+                row = connection.execute(
+                    "SELECT id, status FROM alarms WHERE id = ?", (alarm_id,)
+                ).fetchone()
+                if row is None:
+                    missing_ids.append(alarm_id)
+                    continue
+                if str(row["status"]) != "pending":
+                    unchanged_ids.append(alarm_id)
+                    continue
+                connection.execute(
+                    "UPDATE alarms SET status = ?, updated_at = ? WHERE id = ?",
+                    (new_status, timestamp, alarm_id),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO alarm_actions(alarm_id, session_id, action, note, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (alarm_id, session_id, action, note.strip(), timestamp),
+                )
+                updated_ids.append(alarm_id)
+        return {
+            "updated": updated_ids,
+            "unchanged": unchanged_ids,
+            "missing": missing_ids,
+        }
 
     def count_risk_level(self, risk_level: str, target_date: date) -> int:
         with self._connect() as connection:

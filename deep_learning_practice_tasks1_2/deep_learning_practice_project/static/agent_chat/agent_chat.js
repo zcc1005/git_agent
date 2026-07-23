@@ -470,6 +470,16 @@ function newSessionId() {
 const TERMINAL_MONITORING_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const TERMINAL_REALTIME_STATUSES = new Set(["completed", "stopped", "failed", "interrupted"]);
 
+function boundedRealtimeInterval(value, fallback) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  const interval = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.max(1000, Math.min(interval, 5000));
+}
+
+function nextRealtimePollDelay(startedAt, interval) {
+  return Math.max(0, interval - (performance.now() - startedAt));
+}
+
 function findMonitoringTaskId(value) {
   if (!value || typeof value !== "object") return "";
   if (value.monitoring_job?.task_id) return String(value.monitoring_job.task_id);
@@ -573,6 +583,12 @@ export function mountAgentChat(root) {
   const realtimeStatusEndpoint = root.dataset.realtimeStatusEndpoint || "/api/agent/realtime-inspection/status";
   const realtimeEventsEndpoint = root.dataset.realtimeEventsEndpoint || "/api/agent/realtime-inspection/events";
   const realtimeStopEndpoint = root.dataset.realtimeStopEndpoint || "/api/agent/realtime-inspection/stop";
+  const realtimeStatusPollMs = boundedRealtimeInterval(root.dataset.realtimeStatusPollMs, 2000);
+  const realtimeEventPollMs = boundedRealtimeInterval(root.dataset.realtimeEventPollMs, 1000);
+  const realtimeRequestTimeoutMs = boundedRealtimeInterval(
+    root.dataset.realtimeRequestTimeoutMs,
+    4000,
+  );
   const storageKey = "foreign-object-agent-session";
   const sessionsStorageKey = `${storageKey}:sessions-v1`;
   const activeRealtimeTaskStorageKey = `${storageKey}:active-realtime-task`;
@@ -608,8 +624,11 @@ export function mountAgentChat(root) {
   let realtimeTaskOwnerSessionId = String(activeTask.session_id || "");
   let realtimeTimer = 0;
   let realtimePolling = false;
+  let realtimeStatusAbortController = null;
   let realtimeEventTimer = 0;
   let realtimeEventPolling = false;
+  let realtimeEventAbortController = null;
+  let realtimePollGeneration = 0;
   let realtimeEventCursor = "";
   let displayedRealtimeEvents = new Set();
   let highRiskNotifiedEvents = new Set();
@@ -1034,24 +1053,51 @@ export function mountAgentChat(root) {
     localStorage.setItem(keys.notified, JSON.stringify(Array.from(highRiskNotifiedEvents).slice(-200)));
   }
 
-  function scheduleRealtimeEventPoll(delay = 3000) {
+  function scheduleRealtimeEventPoll(delay = realtimeEventPollMs) {
     window.clearTimeout(realtimeEventTimer);
     realtimeEventTimer = window.setTimeout(() => pollRealtimeEvents(), delay);
   }
 
+  function scheduleRealtimeStatusPoll(delay = realtimeStatusPollMs) {
+    window.clearTimeout(realtimeTimer);
+    realtimeTimer = window.setTimeout(() => pollRealtime(), delay);
+  }
+
+  function startRealtimeFetch(url) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), realtimeRequestTimeoutMs);
+    const response = fetch(url, { signal: controller.signal, cache: "no-store" })
+      .finally(() => window.clearTimeout(timeout));
+    return { response, controller };
+  }
+
   async function pollRealtimeEvents(initial = false, explicitTaskId = "") {
-    if (realtimeEventPolling) return;
+    if (realtimeEventPolling) {
+      scheduleRealtimeEventPoll(100);
+      return;
+    }
     const taskId = String(explicitTaskId || realtimeTaskId || "");
     if (!taskId) return;
+    const ownerSessionId = realtimeTaskOwnerSessionId || sessionId;
+    const generation = realtimePollGeneration;
+    const startedAt = performance.now();
+    let continuePolling = true;
     realtimeEventPolling = true;
     try {
       const url = new URL(realtimeEventsEndpoint, window.location.origin);
-      url.searchParams.set("session_id", realtimeTaskOwnerSessionId || sessionId);
+      url.searchParams.set("session_id", ownerSessionId);
       url.searchParams.set("task_id", taskId);
       url.searchParams.set("limit", "50");
       if (realtimeEventCursor) url.searchParams.set("after_event_id", realtimeEventCursor);
-      const response = await fetch(url);
+      const request = startRealtimeFetch(url);
+      realtimeEventAbortController = request.controller;
+      const response = await request.response;
       const result = await response.json().catch(() => ({}));
+      if (
+        generation !== realtimePollGeneration
+        || taskId !== realtimeTaskId
+        || ownerSessionId !== (realtimeTaskOwnerSessionId || sessionId)
+      ) return;
       if (!response.ok || !result.ok) return;
       const events = Array.isArray(result.data?.events) ? result.data.events : [];
       const task = result.data?.task || {};
@@ -1074,51 +1120,83 @@ export function mountAgentChat(root) {
       }
       saveRealtimeEventState(taskId);
       if (task?.task_id) renderRealtime(task, events);
-      if (task && !TERMINAL_REALTIME_STATUSES.has(String(task.status || ""))) {
-        scheduleRealtimeEventPoll(initial ? 1000 : 3000);
-      }
+      continuePolling = !task?.task_id
+        || !TERMINAL_REALTIME_STATUSES.has(String(task.status || ""));
     } catch (_error) {
-      if (realtimeTaskId) scheduleRealtimeEventPoll(5000);
+      // A timeout or transient request error must not stop the incremental event loop.
     } finally {
+      realtimeEventAbortController = null;
       realtimeEventPolling = false;
+      if (
+        continuePolling
+        && generation === realtimePollGeneration
+        && taskId === realtimeTaskId
+      ) {
+        scheduleRealtimeEventPoll(nextRealtimePollDelay(startedAt, realtimeEventPollMs));
+      }
     }
   }
 
   async function pollRealtime(initial = false) {
     if (realtimePolling) {
-      window.clearTimeout(realtimeTimer);
-      realtimeTimer = window.setTimeout(() => pollRealtime(initial), 250);
+      scheduleRealtimeStatusPoll(100);
       return;
     }
+    const requestedTaskId = realtimeTaskId;
+    const ownerSessionId = realtimeTaskOwnerSessionId || sessionId;
+    const generation = realtimePollGeneration;
+    const startedAt = performance.now();
+    let continuePolling = true;
     realtimePolling = true;
     try {
       const url = new URL(realtimeStatusEndpoint, window.location.origin);
-      url.searchParams.set("session_id", realtimeTaskOwnerSessionId || sessionId);
-      if (realtimeTaskId) url.searchParams.set("task_id", realtimeTaskId);
-      const response = await fetch(url);
+      url.searchParams.set("session_id", ownerSessionId);
+      if (requestedTaskId) url.searchParams.set("task_id", requestedTaskId);
+      const request = startRealtimeFetch(url);
+      realtimeStatusAbortController = request.controller;
+      const response = await request.response;
       const result = await response.json().catch(() => ({}));
+      if (
+        generation !== realtimePollGeneration
+        || requestedTaskId !== realtimeTaskId
+        || ownerSessionId !== (realtimeTaskOwnerSessionId || sessionId)
+      ) return;
       const task = result.data?.task || result.data?.tasks?.[0];
       if (response.ok && result.ok && task) {
         if (!realtimeTaskId) {
+          continuePolling = false;
           activateRealtime(String(task.task_id), task, realtimeTaskOwnerSessionId || sessionId);
           return;
         }
         renderRealtime(task, result.data?.events || []);
-        if (!TERMINAL_REALTIME_STATUSES.has(String(task.status || ""))) {
-          realtimeTimer = window.setTimeout(() => pollRealtime(), 3000);
-        } else {
-          await pollRealtimeEvents(false, String(task.task_id));
-          window.clearTimeout(realtimeEventTimer);
+        continuePolling = !TERMINAL_REALTIME_STATUSES.has(String(task.status || ""));
+        if (!continuePolling) {
+          scheduleRealtimeEventPoll(0);
           terminalAnnouncedTasks.add(String(task.task_id));
         }
       }
     } catch (_error) {
-      realtimeTimer = window.setTimeout(() => pollRealtime(), 5000);
-    } finally { realtimePolling = false; }
+      // Keep polling after request timeouts and temporary server failures.
+    } finally {
+      realtimeStatusAbortController = null;
+      realtimePolling = false;
+      if (
+        continuePolling
+        && generation === realtimePollGeneration
+        && requestedTaskId === realtimeTaskId
+      ) {
+        scheduleRealtimeStatusPoll(nextRealtimePollDelay(startedAt, realtimeStatusPollMs));
+      }
+    }
   }
 
   function activateRealtime(taskId, task = null, ownerSessionId = sessionId) {
     const changedTask = taskId !== realtimeTaskId;
+    if (changedTask) {
+      realtimePollGeneration += 1;
+      realtimeStatusAbortController?.abort();
+      realtimeEventAbortController?.abort();
+    }
     realtimeTaskId = taskId;
     realtimeTaskOwnerSessionId = ownerSessionId || sessionId;
     activeTask = {
@@ -1138,7 +1216,7 @@ export function mountAgentChat(root) {
     if (task && TERMINAL_REALTIME_STATUSES.has(String(task.status || ""))) {
       return;
     }
-    realtimeTimer = window.setTimeout(() => pollRealtime(), 0);
+    scheduleRealtimeStatusPoll(0);
     scheduleRealtimeEventPoll(0);
   }
 
@@ -1179,8 +1257,7 @@ export function mountAgentChat(root) {
       }
       const task = result.data?.task || result.data;
       if (task?.task_id) renderRealtime(task, []);
-      window.clearTimeout(realtimeTimer);
-      realtimeTimer = window.setTimeout(() => pollRealtime(), 300);
+      scheduleRealtimeStatusPoll(300);
     } catch (error) {
       realtimeTerminal.hidden = false;
       realtimeTerminal.textContent = `停止任务失败：${error.message}`;

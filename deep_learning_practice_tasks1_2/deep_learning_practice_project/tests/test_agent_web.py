@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import io
+import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from agent import AgentTools
+from storage import SQLiteHistoryStore
 from web_app import app
 
 
@@ -218,12 +222,22 @@ class FakeAgentService:
 class AgentWebIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.previous_service = app.config.get("AGENT_SERVICE")
+        self.previous_history_store = app.config.get("AGENT_HISTORY_STORE")
+        self.previous_alarm_handler = app.config.get("ALARM_CONTROL_HANDLER")
         self.service = FakeAgentService()
         app.config.update(TESTING=True, AGENT_SERVICE=self.service)
         self.client = app.test_client()
 
     def tearDown(self) -> None:
         app.config["AGENT_SERVICE"] = self.previous_service
+        if self.previous_history_store is None:
+            app.config.pop("AGENT_HISTORY_STORE", None)
+        else:
+            app.config["AGENT_HISTORY_STORE"] = self.previous_history_store
+        if self.previous_alarm_handler is None:
+            app.config.pop("ALARM_CONTROL_HANDLER", None)
+        else:
+            app.config["ALARM_CONTROL_HANDLER"] = self.previous_alarm_handler
 
     def test_homepage_mounts_agent_component(self) -> None:
         response = self.client.get("/")
@@ -241,6 +255,10 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertIn('data-agent-realtime-events', html)
         self.assertIn('data-agent-session-tabs', html)
         self.assertIn('data-agent-session-new', html)
+        self.assertIn('data-alarm-risk-filter="high"', html)
+        self.assertIn('id="previousAlarmButton"', html)
+        self.assertIn('id="nextAlarmButton"', html)
+        self.assertIn('id="confirmAllAlarmsButton"', html)
         self.assertIn('<h2 id="dashboardTitle">智能巡检助手</h2>', html)
         self.assertNotIn('id="agentChatTitle"', html)
         self.assertNotIn('理解巡检目标，调用检测、风险研判、历史查询和报警控制能力。', html)
@@ -294,6 +312,39 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertEqual(script.count('let realtimeTimer = 0'), 1)
         self.assertEqual(script.count('let realtimeEventTimer = 0'), 1)
 
+    def test_realtime_polling_is_bounded_recovers_and_discards_stale_responses(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        script = (project_root / "static" / "agent_chat" / "agent_chat.js").read_text(
+            encoding="utf-8"
+        )
+        html = (project_root / "templates" / "components" / "agent_chat.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('data-realtime-status-poll-ms="2000"', html)
+        self.assertIn('data-realtime-event-poll-ms="1000"', html)
+        self.assertIn('data-realtime-request-timeout-ms="4000"', html)
+        self.assertIn('Math.max(1000, Math.min(interval, 5000))', script)
+        self.assertIn('nextRealtimePollDelay(startedAt, realtimeEventPollMs)', script)
+        self.assertIn('nextRealtimePollDelay(startedAt, realtimeStatusPollMs)', script)
+        self.assertIn('cache: "no-store"', script)
+        self.assertIn('controller.abort()', script)
+        self.assertIn('generation !== realtimePollGeneration', script)
+        self.assertIn('taskId !== realtimeTaskId', script)
+
+        event_poll = script.split(
+            'async function pollRealtimeEvents(initial = false, explicitTaskId = "")', 1
+        )[1].split('async function pollRealtime(initial = false)', 1)[0]
+        status_poll = script.split('async function pollRealtime(initial = false)', 1)[1].split(
+            'function activateRealtime(taskId, task = null, ownerSessionId = sessionId)', 1
+        )[0]
+        self.assertIn('finally {', event_poll)
+        self.assertIn('scheduleRealtimeEventPoll(', event_poll)
+        self.assertIn('finally {', status_poll)
+        self.assertIn('scheduleRealtimeStatusPoll(', status_poll)
+        self.assertNotIn('scheduleRealtimeEventPoll(5000)', event_poll)
+        self.assertNotIn('setTimeout(() => pollRealtime(), 5000)', status_poll)
+
     def test_knowledge_reference_is_rendered_as_compact_final_line(self) -> None:
         script = (
             Path(__file__).resolve().parents[1] / "static" / "agent_chat" / "agent_chat.js"
@@ -318,6 +369,117 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertIn('正在实时巡检${source}，时间：${start} 至 ${end}。', script)
         self.assertIn('item?.sourceName === "智能体任务"', script)
         self.assertNotIn('setAgentPhase(', script)
+
+    def test_alarm_center_supports_free_navigation_bulk_action_and_sqlite_snapshot(self) -> None:
+        script = (
+            Path(__file__).resolve().parents[1] / "static" / "web_app.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('function moveSelectedAlarm(offset)', script)
+        self.assertIn('data-alarm-risk-filter', script)
+        self.assertIn('allPending: true', script)
+        self.assertIn('CONSOLE_SNAPSHOT_ENDPOINT', script)
+        self.assertIn('currentDailySummary', script)
+        self.assertIn('alarm_status_counts', script)
+        self.assertIn('reconcileLegacyAlarmActions()', script)
+        self.assertIn('reconcile_only: true', script)
+        self.assertNotIn('fetch("/api/alarm_action"', script)
+
+    def test_console_snapshot_and_bulk_alarm_action_share_sqlite_state(self) -> None:
+        fixed_now = datetime(2026, 7, 23, 10, 3, tzinfo=timezone(timedelta(hours=8)))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SQLiteHistoryStore(
+                Path(temp_dir) / "console.sqlite3", now=lambda: fixed_now
+            )
+            alarms = []
+            for index, risk in enumerate(("high", "medium"), start=1):
+                detection, alarm = store.record_detection(
+                    "web-session",
+                    source_type="image",
+                    source_path=f"image-{index}.jpg",
+                    detection={
+                        "status": "completed",
+                        "has_foreign_object": True,
+                        "num_detections": 1,
+                        "class_counts": {"石块异物": 1},
+                    },
+                    alarm_document={
+                        "report_id": f"alarm-console-{index}",
+                        "overall_risk": {
+                            "level": risk,
+                            "requires_stop": risk == "high",
+                            "reason": f"{risk} risk",
+                        },
+                    },
+                    alarm_report=f"report-{index}",
+                )
+                self.assertTrue(detection.id)
+                alarms.append(alarm)
+            app.config["AGENT_HISTORY_STORE"] = store
+            control_calls = []
+            app.config["ALARM_CONTROL_HANDLER"] = lambda action, alarm: control_calls.append(
+                (action, alarm.id)
+            )
+
+            before = self.client.get("/api/console/snapshot?date=2026-07-23&limit=20")
+            before_payload = before.get_json()
+            self.assertEqual(before.status_code, 200)
+            self.assertEqual(before_payload["summary"]["detection_count"], 2)
+            self.assertEqual(before_payload["summary"]["risk_counts"]["high"], 1)
+            self.assertEqual(before_payload["summary"]["alarm_status_counts"]["pending"], 2)
+            self.assertEqual(len(before_payload["records"]), 2)
+
+            action = self.client.post(
+                "/api/console/alarms/action",
+                json={
+                    "session_id": "web-session",
+                    "action": "confirm",
+                    "alarm_ids": [alarm.id for alarm in alarms],
+                },
+            )
+            action_payload = action.get_json()
+            self.assertEqual(action.status_code, 200)
+            self.assertEqual(action_payload["affected_count"], 2)
+            self.assertEqual(control_calls, [("confirm", alarms[0].id)])
+            self.assertEqual(action_payload["snapshot"]["summary"]["status_counts"]["pending"], 0)
+            self.assertEqual(action_payload["snapshot"]["summary"]["status_counts"]["confirmed"], 2)
+            report = AgentTools(store, now=lambda: fixed_now).generate_daily_report(
+                "web-session", {"date": "2026-07-23"}
+            )
+            self.assertEqual(report["data"]["status_counts"]["pending"], 0)
+            self.assertEqual(report["data"]["status_counts"]["confirmed"], 2)
+            self.assertIn("待确认/已确认/已取消：0/2/0", report["reply"])
+
+            repeated = store.set_pending_alarm_actions(
+                [alarm.id for alarm in alarms], "web-session", "cancel"
+            )
+            self.assertEqual(repeated["updated"], [])
+            self.assertEqual(len(repeated["unchanged"]), 2)
+            self.assertTrue(all(store.get_alarm(alarm.id).status == "confirmed" for alarm in alarms))
+
+            migrated_detection, migrated_alarm = store.record_detection(
+                "web-session",
+                source_type="image",
+                source_path="legacy-image.jpg",
+                detection={"status": "completed", "has_foreign_object": True},
+                alarm_document={
+                    "report_id": "alarm-console-legacy",
+                    "overall_risk": {"level": "medium", "requires_stop": False},
+                },
+                alarm_report="legacy-report",
+            )
+            reconciled = self.client.post(
+                "/api/console/alarms/action",
+                json={
+                    "session_id": "web-session",
+                    "action": "cancel",
+                    "detection_ids": [migrated_detection.id],
+                    "reconcile_only": True,
+                },
+            )
+            self.assertEqual(reconciled.status_code, 200)
+            self.assertEqual(store.get_alarm(migrated_alarm.id).status, "cancelled")
+            self.assertEqual(control_calls, [("confirm", alarms[0].id)])
 
     def test_chat_endpoint_forwards_message_and_session(self) -> None:
         response = self.client.post(
