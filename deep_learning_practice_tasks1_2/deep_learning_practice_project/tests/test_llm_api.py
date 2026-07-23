@@ -18,6 +18,7 @@ from agent.llm_api import (
     load_env_file,
 )
 from agent.planners import SkillPlan, SkillPlanStep
+from scripts.switch_llm_provider import switch_provider
 from storage import SQLiteHistoryStore
 
 
@@ -60,6 +61,70 @@ class LLMAPIConfigTests(unittest.TestCase):
         with patch.dict(os.environ, {"LLM_API_KEY": "key"}, clear=True):
             with self.assertRaisesRegex(ValueError, "LLM_MODEL"):
                 LLMAPIConfig.from_env()
+
+    def test_deepseek_provider_uses_official_profile_and_aider_key_fallback(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_PROVIDER": "deepseek",
+                "OPENAI_API_KEY": "deepseek-key",
+                "LLM_API_KEY": "legacy-key",
+                "LLM_BASE_URL": "https://legacy.example/v1",
+                "LLM_MODEL": "legacy-model",
+            },
+            clear=True,
+        ):
+            config = LLMAPIConfig.from_env()
+
+        self.assertEqual(config.api_key, "deepseek-key")
+        self.assertEqual(config.base_url, "https://api.deepseek.com/v1")
+        self.assertEqual(config.model, "deepseek-v4-pro")
+
+    def test_c4ai_provider_uses_legacy_agent_key_and_profile(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_PROVIDER": "c4ai",
+                "LLM_API_KEY": "c4ai-key",
+                "OPENAI_API_KEY": "deepseek-key",
+            },
+            clear=True,
+        ):
+            config = LLMAPIConfig.from_env()
+
+        self.assertEqual(config.api_key, "c4ai-key")
+        self.assertEqual(
+            config.base_url,
+            "https://c4ai.ccccltd.cn/api/compatible/v1",
+        )
+        self.assertEqual(config.model, "jiaorong-deepseek-v4-pro")
+
+    def test_unknown_provider_is_rejected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"LLM_PROVIDER": "unknown", "LLM_API_KEY": "key"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "LLM_PROVIDER"):
+                LLMAPIConfig.from_env()
+
+    def test_provider_switcher_only_changes_selected_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text(
+                "LLM_PROVIDER=deepseek\n"
+                "LLM_DEEPSEEK_API_KEY=deepseek-secret\n"
+                "LLM_C4AI_API_KEY=c4ai-secret\n",
+                encoding="utf-8",
+            )
+
+            model = switch_provider(env_file, "c4ai")
+            switched = env_file.read_text(encoding="utf-8")
+
+        self.assertEqual(model, "jiaorong-deepseek-v4-pro")
+        self.assertIn("LLM_PROVIDER=c4ai", switched)
+        self.assertIn("LLM_DEEPSEEK_API_KEY=deepseek-secret", switched)
+        self.assertIn("LLM_C4AI_API_KEY=c4ai-secret", switched)
 
     def test_dotenv_does_not_override_process_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -542,6 +607,63 @@ class AgentSkillOrchestrationTests(unittest.TestCase):
 
         self.assertEqual(result["intent"], "skill_plan")
         self.assertEqual(len(planner.calls), 1)
+
+    def test_always_mode_bypasses_planner_for_simple_image_detection(self) -> None:
+        planner = StaticSkillPlanner(
+            SkillPlan(
+                steps=(
+                    SkillPlanStep(
+                        "detect-image",
+                        {"检测记录编号": "invalid", "相关参数": {}},
+                    ),
+                )
+            )
+        )
+        service = AgentService(
+            self.store,
+            tools=self.tools,
+            skill_planner=planner,
+            skill_planner_mode="always",
+        )
+
+        result = service.chat(
+            "检测这个图片",
+            session_id="simple-image",
+            context={
+                "image_path": str(self.image),
+                "detection_id": "previous-detection",
+                "task_id": "realtime-task",
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["intent"], "detect_image")
+        self.assertEqual(planner.calls, [])
+
+    def test_always_mode_bypasses_planner_for_simple_video_without_attachment(self) -> None:
+        planner = StaticSkillPlanner(
+            SkillPlan(
+                steps=(
+                    SkillPlanStep(
+                        "detect-video",
+                        {"检测记录编号": "invalid", "相关参数": {}},
+                    ),
+                )
+            )
+        )
+        service = AgentService(
+            self.store,
+            tools=self.tools,
+            skill_planner=planner,
+            skill_planner_mode="always",
+        )
+
+        result = service.chat("检测视频", session_id="simple-video")
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["requires_attachment"])
+        self.assertEqual(result["intent"], "detect_video")
+        self.assertEqual(planner.calls, [])
 
     def test_multi_step_plan_resolves_previous_detection_id(self) -> None:
         planner = StaticSkillPlanner(

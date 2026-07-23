@@ -543,6 +543,10 @@ CONTROL_REALTIME_INSPECTION_SCHEMA = _object(
                         "description": "只返回仍在持续的 active 事件。"},
         "events_only": {"type": "boolean", "default": False,
                         "description": "按事件查询语义返回结果。"},
+        "task_only": {"type": "boolean", "default": False,
+                      "description": "仅返回任务状态和统计，不加载事件详情与完整报警报告。"},
+        "compact": {"type": "boolean", "default": False,
+                    "description": "返回适合前端轮询的精简事件数据，保留报告正文但省略内部文档。"},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10,
                   "description": "查询返回的任务或聚合事件数量上限。"},
     }

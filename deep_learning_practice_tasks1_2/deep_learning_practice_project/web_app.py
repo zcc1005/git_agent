@@ -637,6 +637,7 @@ def _query_realtime_detail(
     session_id: str, *, task_id: str = "", source_id: str = "", limit: int = 20,
     event_id: str = "", after_event_id: str = "", latest: bool = False,
     active_only: bool = False, events_only: bool = False,
+    task_only: bool = False, compact: bool = False,
 ) -> Dict[str, Any]:
     service = get_agent_service()
     result = service.run_skill(
@@ -646,7 +647,8 @@ def _query_realtime_detail(
                    **({"event_id": event_id} if event_id else {}),
                    **({"after_event_id": after_event_id} if after_event_id else {}),
                    "latest": latest, "active_only": active_only,
-                   "events_only": events_only, "limit": limit},
+                   "events_only": events_only, "task_only": task_only,
+                   "compact": compact, "limit": limit},
     )
     if not result.get("ok") or task_id:
         return result
@@ -663,7 +665,8 @@ def _query_realtime_detail(
                    **({"event_id": event_id} if event_id else {}),
                    **({"after_event_id": after_event_id} if after_event_id else {}),
                    "latest": latest, "active_only": active_only,
-                   "events_only": events_only},
+                   "events_only": events_only, "task_only": task_only,
+                   "compact": compact},
     )
 
 
@@ -1130,7 +1133,8 @@ def api_agent_realtime_inspection_status():
         session_id = _monitoring_session_id(request.args.get("session_id"))
         result = _query_realtime_detail(
             session_id, task_id=str(request.args.get("task_id") or ""),
-            source_id=str(request.args.get("source_id") or ""), limit=int(request.args.get("limit", 20)),
+            source_id=str(request.args.get("source_id") or ""),
+            limit=int(request.args.get("limit", 20)), task_only=True,
         )
         return jsonify({**result, "session_id": session_id}), _monitoring_http_status(result)
     except (TypeError, ValueError) as exc:
@@ -1153,7 +1157,7 @@ def api_agent_realtime_inspection_events():
             event_id=str(request.args.get("event_id") or ""),
             after_event_id=str(request.args.get("after_event_id") or ""),
             latest=as_bool("latest"), active_only=as_bool("active_only"),
-            events_only=True,
+            events_only=True, compact=True,
         )
         return jsonify({**result, "session_id": session_id}), _monitoring_http_status(result)
     except (TypeError, ValueError) as exc:

@@ -630,6 +630,7 @@ export function mountAgentChat(root) {
   let realtimeEventAbortController = null;
   let realtimePollGeneration = 0;
   let realtimeEventCursor = "";
+  let realtimeEventsHydrated = false;
   let displayedRealtimeEvents = new Set();
   let highRiskNotifiedEvents = new Set();
   let unreadRealtimeEvents = 0;
@@ -1041,6 +1042,7 @@ export function mountAgentChat(root) {
       highRiskNotifiedEvents = new Set();
     }
     realtimeEventsByKey.clear();
+    realtimeEventsHydrated = false;
     unreadRealtimeEvents = 0;
     updateRealtimeUnread();
     renderRealtimeEventCenter();
@@ -1088,7 +1090,9 @@ export function mountAgentChat(root) {
       url.searchParams.set("session_id", ownerSessionId);
       url.searchParams.set("task_id", taskId);
       url.searchParams.set("limit", "50");
-      if (realtimeEventCursor) url.searchParams.set("after_event_id", realtimeEventCursor);
+      if (realtimeEventsHydrated && realtimeEventCursor) {
+        url.searchParams.set("after_event_id", realtimeEventCursor);
+      }
       const request = startRealtimeFetch(url);
       realtimeEventAbortController = request.controller;
       const response = await request.response;
@@ -1118,6 +1122,7 @@ export function mountAgentChat(root) {
       if (result.data?.next_event_id) {
         realtimeEventCursor = String(result.data.next_event_id);
       }
+      realtimeEventsHydrated = true;
       saveRealtimeEventState(taskId);
       if (task?.task_id) renderRealtime(task, events);
       continuePolling = !task?.task_id

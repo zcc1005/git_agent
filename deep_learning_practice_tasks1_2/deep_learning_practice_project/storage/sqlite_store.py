@@ -1293,6 +1293,37 @@ class SQLiteHistoryStore:
                     result[alarm.detection_id] = alarm
         return result
 
+    def get_alarm_display_for_detections(
+        self, detection_ids: List[str]
+    ) -> Dict[str, Dict[str, str]]:
+        normalized = list(dict.fromkeys(
+            str(detection_id).strip()
+            for detection_id in detection_ids
+            if str(detection_id).strip()
+        ))
+        result: Dict[str, Dict[str, str]] = {}
+        with self._connect() as connection:
+            for offset in range(0, len(normalized), 900):
+                chunk = normalized[offset : offset + 900]
+                if not chunk:
+                    continue
+                placeholders = ",".join("?" for _ in chunk)
+                rows = connection.execute(
+                    f"SELECT detection_id, status, report_text FROM alarms "
+                    f"WHERE detection_id IN ({placeholders})",
+                    tuple(chunk),
+                ).fetchall()
+                result.update(
+                    {
+                        str(row["detection_id"]): {
+                            "status": str(row["status"]),
+                            "report_text": str(row["report_text"] or ""),
+                        }
+                        for row in rows
+                    }
+                )
+        return result
+
     def list_alarms(
         self, *, status: str = "", limit: int = 500
     ) -> List[AlarmRecord]:

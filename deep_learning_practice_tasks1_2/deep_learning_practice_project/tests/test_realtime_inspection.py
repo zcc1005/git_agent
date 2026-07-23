@@ -539,6 +539,92 @@ class RealtimeInspectionSkillTests(unittest.TestCase):
         self.assertIn("读取250帧", result.reply)
         self.assertIn("推理20帧", result.reply)
 
+    def test_task_only_query_does_not_build_event_reports(self):
+        now = datetime.now(timezone.utc)
+        task = self.store.create_realtime_inspection_task(
+            "s1", source_id="main-monitor", line_id="main-line", zone_id="",
+            start_time=now, end_time=now + timedelta(minutes=2), sample_fps=2,
+            config=config(),
+        )
+        self.store.update_realtime_inspection_task(
+            task.id, status="running", frames_read=250, frames_inferred=20,
+            events_detected=1, alarms_created=1, highest_risk_level="high",
+        )
+        self.store.record_realtime_inspection_event(
+            event_id=f"{task.id}-event-0001", task_id=task.id,
+            source_id="main-monitor", detected_at=now.isoformat(),
+            ended_at="", class_name="石块异物", confidence=0.91,
+            bbox=[10, 20, 100, 120], risk_level="high",
+            detection_id="det-realtime-1", alarm_id="alarm-realtime-1",
+            image_path="outputs/realtime/event_0001.jpg", metadata={},
+        )
+
+        with patch.object(
+            self.store,
+            "list_realtime_inspection_events",
+            side_effect=AssertionError("状态轮询不应读取事件详情"),
+        ):
+            result = self.skills.invoke(
+                "control-realtime-inspection",
+                session_id="s1",
+                arguments={
+                    "action": "query",
+                    "task_id": task.id,
+                    "task_only": True,
+                },
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data["task"]["frames_read"], 250)
+        self.assertEqual(result.data["events"], [])
+        self.assertNotIn("realtime_report", result.data)
+
+    def test_compact_event_query_omits_internal_alarm_document(self):
+        now = datetime.now(timezone.utc)
+        task = self.store.create_realtime_inspection_task(
+            "s1", source_id="main-monitor", line_id="main-line", zone_id="",
+            start_time=now, end_time=now + timedelta(minutes=2), sample_fps=2,
+            config=config(),
+        )
+        detection, alarm = self.store.record_detection(
+            "s1", source_type="realtime",
+            source_path=f"realtime://main-monitor/{task.id}",
+            detection={"status": "completed", "class_counts": {"石块异物": 1}},
+            alarm_document={
+                "report_id": "alarm-compact",
+                "overall_risk": {"level": "high", "requires_stop": True},
+            },
+            alarm_report="测试报警报告",
+        )
+        self.store.record_realtime_inspection_event(
+            event_id=f"{task.id}-event-0001", task_id=task.id,
+            source_id="main-monitor", detected_at=now.isoformat(),
+            ended_at="", class_name="石块异物", confidence=0.91,
+            bbox=[10, 20, 100, 120], risk_level="high",
+            detection_id=detection.id, alarm_id=alarm.id,
+            image_path="outputs/realtime/event_0001.jpg",
+            metadata={"alarm_json_path": "outputs/realtime/alarm.json"},
+        )
+
+        result = self.skills.invoke(
+            "control-realtime-inspection",
+            session_id="s1",
+            arguments={
+                "action": "query",
+                "task_id": task.id,
+                "events_only": True,
+                "compact": True,
+            },
+        )
+
+        self.assertTrue(result.ok)
+        event = result.data["events"][0]
+        self.assertEqual(event["alarm_status"], "pending")
+        self.assertEqual(event["alarm_report"]["text"], "测试报警报告")
+        self.assertNotIn("document", event["alarm_report"])
+        self.assertNotIn("metadata", event)
+        self.assertNotIn("realtime_report", result.data)
+
     def test_natural_language_status_query_bypasses_slow_llm_planner(self):
         now = datetime.now(timezone.utc)
         task = self.store.create_realtime_inspection_task(

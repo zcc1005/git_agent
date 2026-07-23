@@ -1181,6 +1181,8 @@ class AgentTools:
         after_event_id = str(context.get("after_event_id") or "").strip().lower()
         active_only = bool(context.get("active_only", False))
         latest = bool(context.get("latest", False))
+        task_only = bool(context.get("task_only", False))
+        compact = bool(context.get("compact", False))
         event_query = bool(event_id or after_event_id or active_only or latest or context.get("events_only"))
         if action == "query":
             if event_id:
@@ -1193,7 +1195,9 @@ class AgentTools:
                     return {"ok": False, "error_code": "event_not_found",
                             "reply": "找不到当前会话的实时巡检事件。", "data": {}}
                 task_data = self._realtime_task_display_data(task)
-                event_data = self._realtime_event_display_data(selected_event)
+                event_data = self._realtime_event_display_values(
+                    [selected_event], compact=compact
+                )[0]
                 return {"ok": True, "reply": f"已找到事件 {event_id} 的详细报告。",
                         "data": {"found": True, "task": task_data, "events": [event_data],
                                  "next_event_id": event_id}}
@@ -1201,25 +1205,37 @@ class AgentTools:
                 task = self.store.get_realtime_inspection_task(task_id)
                 if task is None or task.session_id != session_id:
                     return {"ok": False, "error_code": "task_not_found", "reply": "找不到当前会话的实时巡检任务。", "data": {}}
+                task_data = self._realtime_task_display_data(task)
+                if task_only:
+                    return {
+                        "ok": True,
+                        "reply": self._realtime_task_status_reply(task_data),
+                        "data": {"found": True, "task": task_data, "events": []},
+                    }
                 events = self.store.list_realtime_inspection_events(
                     task.id, limit, active_only=active_only,
                     after_event_id=after_event_id, latest=latest,
                 )
                 if event_query and not after_event_id and not latest:
                     events = list(reversed(events))
-                task_data = self._realtime_task_display_data(task)
-                report = self._realtime_inspection_report(task_data, events)
                 reply = (
                     "当前实时巡检尚未确认异物事件。"
                     if event_query and not events
                     else self._realtime_task_status_reply(task_data)
                 )
-                event_values = [self._realtime_event_display_data(item) for item in events]
+                event_values = self._realtime_event_display_values(
+                    events, compact=compact
+                )
+                report = (
+                    {}
+                    if compact
+                    else self._realtime_inspection_report(task_data, events)
+                )
                 return {"ok": True, "reply": reply,
                         "data": {"found": True, "task": task_data,
                                  "events": event_values,
                                  "next_event_id": event_values[-1]["event_id"] if event_values else after_event_id,
-                                 "realtime_report": report}}
+                                 **({"realtime_report": report} if report else {})}}
             tasks = self.store.list_realtime_inspection_tasks(session_id=session_id, source_id=source_id, limit=limit)
             if not tasks:
                 return {"ok": True, "reply": "当前会话还没有实时巡检任务。",
@@ -1228,15 +1244,34 @@ class AgentTools:
                 (item for item in tasks if item.status in ACTIVE_REALTIME_INSPECTION_STATUSES),
                 tasks[0],
             )
+            task_data = self._realtime_task_display_data(active)
+            if task_only:
+                return {
+                    "ok": True,
+                    "reply": self._realtime_task_status_reply(task_data),
+                    "data": {
+                        "found": True,
+                        "task": task_data,
+                        "tasks": [
+                            self._realtime_task_display_data(item) for item in tasks
+                        ],
+                        "events": [],
+                    },
+                }
             events = self.store.list_realtime_inspection_events(
                 active.id, limit, active_only=active_only,
                 after_event_id=after_event_id, latest=latest,
             )
             if event_query and not after_event_id and not latest:
                 events = list(reversed(events))
-            task_data = self._realtime_task_display_data(active)
-            report = self._realtime_inspection_report(task_data, events)
-            event_values = [self._realtime_event_display_data(item) for item in events]
+            report = (
+                {}
+                if compact
+                else self._realtime_inspection_report(task_data, events)
+            )
+            event_values = self._realtime_event_display_values(
+                events, compact=compact
+            )
             return {
                 "ok": True,
                 "reply": (
@@ -1250,7 +1285,7 @@ class AgentTools:
                     "tasks": [self._realtime_task_display_data(item) for item in tasks],
                     "events": event_values,
                     "next_event_id": event_values[-1]["event_id"] if event_values else after_event_id,
-                    "realtime_report": report,
+                    **({"realtime_report": report} if report else {}),
                 },
             }
         if action != "stop":
@@ -1315,10 +1350,56 @@ class AgentTools:
             data["display_name"] = str(source.get("display_name") or task.source_id)
         return data
 
-    def _realtime_event_display_data(self, record: Any) -> Dict[str, Any]:
+    def _realtime_event_display_values(
+        self, records: Sequence[Any], *, compact: bool = False
+    ) -> list[Dict[str, Any]]:
+        values = [
+            record.to_dict() if hasattr(record, "to_dict") else dict(record)
+            for record in records
+        ]
+        detection_ids = [
+            str(value.get("detection_id") or "") for value in values
+        ]
+        if compact:
+            alarm_display = self.store.get_alarm_display_for_detections(
+                detection_ids
+            )
+            return [
+                self._realtime_event_display_data(
+                    value,
+                    alarm_status=alarm_display.get(
+                        str(value.get("detection_id") or ""), {}
+                    ).get("status", "inactive"),
+                    alarm_report_text=alarm_display.get(
+                        str(value.get("detection_id") or ""), {}
+                    ).get("report_text", ""),
+                    compact=True,
+                )
+                for value in values
+            ]
+        alarms = self.store.get_alarms_for_detections(detection_ids)
+        return [
+            self._realtime_event_display_data(
+                value,
+                alarm=alarms.get(str(value.get("detection_id") or "")),
+                compact=compact,
+            )
+            for value in values
+        ]
+
+    def _realtime_event_display_data(
+        self,
+        record: Any,
+        *,
+        alarm: Optional[AlarmRecord] = None,
+        alarm_status: str = "",
+        alarm_report_text: str = "",
+        compact: bool = False,
+    ) -> Dict[str, Any]:
         event = record.to_dict() if hasattr(record, "to_dict") else dict(record)
-        alarm = self.store.get_alarm(str(event.get("alarm_id") or ""))
-        alarm_status = str(alarm.status if alarm is not None else "inactive")
+        alarm_status = str(
+            alarm_status or (alarm.status if alarm is not None else "inactive")
+        )
         metadata = event.get("metadata") if isinstance(event.get("metadata"), Mapping) else {}
         event["alarm_status"] = alarm_status
         event["alarm_status_name"] = ALARM_STATUS_NAMES.get(alarm_status, alarm_status)
@@ -1329,11 +1410,22 @@ class AgentTools:
             event.get("representative_frame") or event.get("image_path") or ""
         )
         event["alarm_report"] = {
-            "text": str(event.get("alarm_report") or (alarm.report_text if alarm else "")),
-            "document": dict(alarm.report) if alarm is not None else {},
+            "text": str(
+                event.get("alarm_report")
+                or alarm_report_text
+                or (alarm.report_text if alarm else "")
+            ),
             "json_path": str(metadata.get("alarm_json_path") or ""),
             "report_path": str(metadata.get("alarm_report_path") or ""),
+            **(
+                {}
+                if compact
+                else {"document": dict(alarm.report) if alarm is not None else {}}
+            ),
         }
+        if compact:
+            event.pop("metadata", None)
+            event["_skip_detection_presentation"] = True
         return event
 
     def _schedule_realtime_event_summary(

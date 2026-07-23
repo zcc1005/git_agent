@@ -211,7 +211,12 @@ class AgentService:
 
     def _skill_handler(self, skill_name: str, **defaults: Any):
         def handler(session_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
-            arguments = {**defaults, **context}
+            spec = self.skill_registry.spec(skill_name)
+            arguments = {
+                name: value
+                for name, value in {**defaults, **context}.items()
+                if name in spec.allowed_inputs
+            }
             return self.skill_registry.invoke(
                 skill_name,
                 session_id=session_id,
@@ -524,6 +529,9 @@ class AgentService:
             or inherited_source_name
             or ""
         )
+        skip_detection_presentation = bool(
+            value.pop("_skip_detection_presentation", False)
+        )
         detection_id = str(value.get("detection_id") or "").strip()
         is_detection_result = bool(
             detection_id
@@ -533,7 +541,11 @@ class AgentService:
                 or (value.get("class_counts") is not None and value.get("risk_level"))
             )
         )
-        if is_detection_result and not value.get("structured_alert"):
+        if (
+            is_detection_result
+            and not skip_detection_presentation
+            and not value.get("structured_alert")
+        ):
             presentation = self.tools.detection_presentation(
                 session_id,
                 detection_id,
@@ -951,10 +963,21 @@ class AgentService:
             if llm_route.get("mode") == "knowledge":
                 use_knowledge = True
 
-        use_skill_planner = self.skill_planner is not None and not use_knowledge and match.intent != Intent.HELP and (
-            self.skill_planner_mode == "always"
-            or match.intent == Intent.UNKNOWN
-            or bool(PLANNING_HINT.search(message))
+        has_planning_hint = bool(PLANNING_HINT.search(message))
+        simple_attachment_detection = (
+            match.intent in {Intent.DETECT_IMAGE, Intent.DETECT_VIDEO}
+            and not has_planning_hint
+        )
+        use_skill_planner = (
+            self.skill_planner is not None
+            and not use_knowledge
+            and match.intent != Intent.HELP
+            and not simple_attachment_detection
+            and (
+                self.skill_planner_mode == "always"
+                or match.intent == Intent.UNKNOWN
+                or has_planning_hint
+            )
         )
         should_use_stored_attachment = use_skill_planner or match.intent in {
             Intent.DETECT_IMAGE,

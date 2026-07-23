@@ -277,6 +277,9 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertIn('after_event_id', script)
         self.assertIn('realtimeEventKey(event)', script)
         self.assertIn('displayedRealtimeEvents.has(key)', script)
+        self.assertIn('let realtimeEventsHydrated = false', script)
+        self.assertIn('if (realtimeEventsHydrated && realtimeEventCursor)', script)
+        self.assertIn('realtimeEventsHydrated = true', script)
         self.assertIn('event.event_status === "closed" ? "已关闭" : "持续中"', script)
         self.assertNotIn('realtimeReportAnnouncedTaskId', script)
         self.assertIn('new CustomEvent("agent:realtime-event"', script)
@@ -689,10 +692,12 @@ class AgentWebIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.get_json()["data"]["task"]["frames_inferred"], 60)
+        self.assertTrue(self.service.skill_calls[-1]["arguments"]["task_only"])
         events = self.client.get(
             f"/api/agent/realtime-inspection/events?session_id=web-session&task_id={self.service.realtime_task_id}"
         )
         self.assertEqual(len(events.get_json()["data"]["events"]), 1)
+        self.assertTrue(self.service.skill_calls[-1]["arguments"]["compact"])
         stopped = self.client.post(
             "/api/agent/realtime-inspection/stop",
             json={"session_id": "web-session", "task_id": self.service.realtime_task_id},
@@ -714,6 +719,7 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertEqual(call["arguments"]["after_event_id"], cursor)
         self.assertTrue(call["arguments"]["active_only"])
         self.assertTrue(call["arguments"]["events_only"])
+        self.assertTrue(call["arguments"]["compact"])
         self.assertEqual(call["arguments"]["limit"], 25)
 
     def test_monitoring_stop_endpoint_uses_control_skill(self) -> None:

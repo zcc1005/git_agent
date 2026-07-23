@@ -66,15 +66,51 @@ class LLMAPIConfig:
 
     @classmethod
     def from_env(cls) -> "LLMAPIConfig":
-        api_key = (os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip()
-        model = (os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or "").strip()
-        base_url = (
-            os.getenv("LLM_BASE_URL")
-            or os.getenv("OPENAI_BASE_URL")
-            or "https://api.openai.com/v1"
-        ).strip()
+        provider = (os.getenv("LLM_PROVIDER") or "").strip().lower()
+        if provider == "deepseek":
+            api_key = (
+                os.getenv("LLM_DEEPSEEK_API_KEY")
+                or os.getenv("OPENAI_API_KEY")
+                or ""
+            ).strip()
+            model = (
+                os.getenv("LLM_DEEPSEEK_MODEL")
+                or "deepseek-v4-pro"
+            ).strip()
+            base_url = (
+                os.getenv("LLM_DEEPSEEK_BASE_URL")
+                or "https://api.deepseek.com/v1"
+            ).strip()
+        elif provider == "c4ai":
+            api_key = (
+                os.getenv("LLM_C4AI_API_KEY")
+                or os.getenv("LLM_API_KEY")
+                or ""
+            ).strip()
+            model = (
+                os.getenv("LLM_C4AI_MODEL")
+                or "jiaorong-deepseek-v4-pro"
+            ).strip()
+            base_url = (
+                os.getenv("LLM_C4AI_BASE_URL")
+                or "https://c4ai.ccccltd.cn/api/compatible/v1"
+            ).strip()
+        elif provider:
+            raise ValueError("LLM_PROVIDER 只能是 deepseek 或 c4ai")
+        else:
+            api_key = (os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip()
+            model = (os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or "").strip()
+            base_url = (
+                os.getenv("LLM_BASE_URL")
+                or os.getenv("OPENAI_BASE_URL")
+                or "https://api.openai.com/v1"
+            ).strip()
         if not api_key:
-            raise ValueError("未配置 LLM_API_KEY；请复制 .env.example 为 .env 并填写密钥")
+            key_name = {
+                "deepseek": "LLM_DEEPSEEK_API_KEY 或 OPENAI_API_KEY",
+                "c4ai": "LLM_C4AI_API_KEY 或 LLM_API_KEY",
+            }.get(provider, "LLM_API_KEY")
+            raise ValueError(f"未配置 {key_name}；请在 .env 中填写对应供应商密钥")
         if not model:
             raise ValueError("未配置 LLM_MODEL；请填写服务商支持的模型名称")
         timeout = float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))

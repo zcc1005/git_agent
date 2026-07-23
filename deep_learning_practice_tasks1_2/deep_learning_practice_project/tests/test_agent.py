@@ -98,6 +98,19 @@ class IntentRecognizerTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.recognizer.recognize(text).intent, intent)
 
+    def test_short_attachment_detection_phrases_are_recognized(self) -> None:
+        cases = {
+            "检测图片": Intent.DETECT_IMAGE,
+            "检测这个图片": Intent.DETECT_IMAGE,
+            "分析图片": Intent.DETECT_IMAGE,
+            "检测视频": Intent.DETECT_VIDEO,
+            "检测这个视频": Intent.DETECT_VIDEO,
+            "分析视频": Intent.DETECT_VIDEO,
+        }
+        for text, intent in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(self.recognizer.recognize(text).intent, intent)
+
     def test_unknown_text_is_not_routed_to_alarm_action(self) -> None:
         self.assertEqual(self.recognizer.recognize("查询已取消报警").intent, Intent.UNKNOWN)
 
@@ -268,6 +281,32 @@ class AgentServiceTests(unittest.TestCase):
         )
         self.assertEqual(previous["data"]["source_type"], "image")
         self.assertEqual(previous["data"]["detection_count"], 2)
+
+    def test_detection_routes_ignore_unrelated_conversation_context(self) -> None:
+        image_result = self.service.chat(
+            "检测这个图片",
+            session_id="context-image",
+            context={
+                "image_path": str(self.image),
+                "detection_id": "old-detection",
+                "task_id": "running-realtime-task",
+                "_attachment_preview": {"preview_path": "outputs/preview.jpg"},
+            },
+        )
+        video_result = self.service.chat(
+            "检测视频",
+            session_id="context-video",
+            context={
+                "video_path": str(self.video),
+                "detection_id": "old-detection",
+                "task_id": "running-realtime-task",
+            },
+        )
+
+        self.assertTrue(image_result["ok"])
+        self.assertEqual(image_result["intent"], "detect_image")
+        self.assertTrue(video_result["ok"])
+        self.assertEqual(video_result["intent"], "detect_video")
 
     def test_image_detection_without_image_requests_attachment(self) -> None:
         response = self.service.chat("检测这张图片", session_id="image-session")
