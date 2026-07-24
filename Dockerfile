@@ -42,6 +42,6 @@ VOLUME ["/app/outputs", "/models"]
 
 EXPOSE 5000
 
-# Use Flask's CLI here so the container listens on all interfaces (the source
-# file's local-development entry point intentionally binds to 127.0.0.1).
-CMD ["flask", "--app", "web_app:app", "run", "--host=0.0.0.0", "--port=5000"]
+# Use the application's entry point so HOST and PORT can be configured through
+# environment variables in either Docker or Compose deployments.
+CMD ["python", "web_app.py"]

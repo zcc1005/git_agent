@@ -1544,7 +1544,9 @@ def api_alarm_action():
 
 
 def main() -> None:
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "5000"))
+    app.run(host=host, port=port, debug=False)
 
 
 if __name__ == "__main__":
