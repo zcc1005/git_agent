@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 from zoneinfo import ZoneInfo
 
-from project_config import OUTPUTS_DIR, PROJECT_ROOT
+from project_config import (
+    OUTPUTS_DIR,
+    PROJECT_ROOT,
+    portable_project_path,
+    resolve_runtime_path,
+)
 from storage import SQLiteHistoryStore
 
 from .knowledge_base import (
@@ -101,10 +106,18 @@ REALTIME_EVENT_DETAIL_PATTERN = re.compile(
 )
 KNOWLEDGE_HOWTO_PATTERN = re.compile(r"(?:如何|怎么|怎样|该怎么).{0,40}(?:使用|配置|接入|启动|查询|查看|停止|检测|保存|运行)")
 KNOWLEDGE_DOMAIN_PATTERN = re.compile(
-    r"(?:这个系统|本系统|项目|功能|配置|参数|文件|目录|路径|源码|代码|函数|接口|数据库|Skill|RTSP|YOLO|MediaMTX|FFmpeg|"
+    r"(?:这个系统|本系统|项目|功能|配置|参数|文件|目录|路径|源码|代码|函数|接口|数据库|"
+    r"上传|图片|视频|媒体|附件|对话框|显示|存储|保存|去重|容器|Docker|部署|模型权重|大模型|知识库|知识问答|问答|回答|"
+    r"检测|候选|异物|监控|断流|中断|重连|报警|告警|"
+    r"Skill|RTSP|YOLO|MediaMTX|FFmpeg|"
     r"sample_fps|known_conf|conf|unknown|NMS|报警(?:规则|报告|记录|信息|数据|机制)|"
     r"告警(?:规则|报告|记录|信息|数据|机制)|历史记录|检测历史|报警历史|历史报警|历史录像|代表帧|"
     r"实时检测|周期巡检|实时巡检|持续巡检|录像归档|Web服务|connecting|reconnecting|gpu_busy)",
+    re.I,
+)
+KNOWLEDGE_EXPLANATION_PATTERN = re.compile(
+    r"(?:是什么|有什么|能做什么|支持哪些|为什么|为何|区别|不同|什么意思|含义|作用|用途|"
+    r"在哪里|保存在哪|分别|哪些|原理|流程|会修改什么|会怎样|怎么保证|怎么区分|如何避免)",
     re.I,
 )
 KNOWLEDGE_QUESTION_PATTERN = re.compile(
@@ -121,6 +134,8 @@ KNOWLEDGE_CONTEXT_PATTERN = re.compile(
 DYNAMIC_STATE_PATTERN = re.compile(
     r"(?:(?:当前|现在|目前|今天|上一轮|上一次|最近一次).{0,20}(?:在线|连接状态|任务状态|运行状态|"
     r"正在运行|报警数量|几次|多少|检测结果)|(?:主监控|监控源).{0,12}(?:在线吗|是否在线|连接正常吗))"
+    r"|(?:(?:当前|现在|目前).{0,20}(?:监控|任务|系统).{0,12}(?:情况|怎么样|如何|状态))"
+    r"|(?:(?:看看|查看|查询).{0,12}(?:监控|任务|系统).{0,12}(?:现在|当前|目前).{0,8}(?:情况|怎么样|如何|状态))"
 )
 STATIC_STATUS_EXPLANATION_PATTERN = re.compile(
     r"(?:为什么|为何|什么意思|含义).{0,24}(?:connecting|reconnecting|gpu_busy|interrupted|failed)",
@@ -338,6 +353,11 @@ class AgentService:
             return True
         if KNOWLEDGE_HOWTO_PATTERN.search(message) and KNOWLEDGE_DOMAIN_PATTERN.search(message):
             return True
+        if (
+            KNOWLEDGE_DOMAIN_PATTERN.search(message)
+            and KNOWLEDGE_EXPLANATION_PATTERN.search(message)
+        ):
+            return True
         if match.intent == Intent.HELP:
             return True
         if match.intent != Intent.UNKNOWN:
@@ -423,7 +443,7 @@ class AgentService:
         contextual = bool(previous_query and KNOWLEDGE_CONTEXT_PATTERN.search(message.strip()))
         retrieval_query = f"{previous_query} {message}" if contextual else message
         answer_mode = self.knowledge_base.answer_mode(message)
-        hits = self.knowledge_base.search(retrieval_query, limit=6)
+        hits = self.knowledge_base.search(retrieval_query, limit=8)
         evidence = [item.to_dict() for item in hits]
         if not hits:
             return {
@@ -572,7 +592,7 @@ class AgentService:
             raw_path = context.get(path_key)
             if not raw_path:
                 continue
-            path = str(raw_path)
+            path = portable_project_path(str(raw_path))
             attachment = {
                 "media_type": media_type,
                 "path": path,
@@ -585,7 +605,7 @@ class AgentService:
             if isinstance(preview, Mapping):
                 for name in ("preview_path", "poster_path"):
                     if preview.get(name) not in (None, ""):
-                        attachment[name] = str(preview[name])
+                        attachment[name] = portable_project_path(str(preview[name]))
             return attachment
         return {}
 
@@ -598,10 +618,13 @@ class AgentService:
             if not isinstance(attachment, Mapping):
                 continue
             media_type = str(attachment.get("media_type") or "")
-            path = str(attachment.get("path") or "")
-            if media_type not in ATTACHMENT_LABELS or not path or not Path(path).is_file():
+            stored_path = str(attachment.get("path") or "")
+            if media_type not in ATTACHMENT_LABELS or not stored_path:
                 continue
-            context: Dict[str, Any] = {f"{media_type}_path": path}
+            path = resolve_runtime_path(stored_path)
+            if not path.is_file():
+                continue
+            context: Dict[str, Any] = {f"{media_type}_path": str(path)}
             for name in ("video_start_time", "line_id"):
                 if attachment.get(name) not in (None, ""):
                     context[name] = attachment[name]

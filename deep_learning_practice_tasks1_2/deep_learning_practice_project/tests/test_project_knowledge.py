@@ -368,6 +368,40 @@ class ProjectKnowledgeTests(unittest.TestCase):
         self.assertLess(reply.index("可以查询历史报警"), reply.index("操作步骤"))
         self.assertLess(reply.index("操作步骤"), reply.index("注意事项"))
 
+    def test_python_sources_are_chunked_by_class_and_method(self) -> None:
+        source = Path(self.temp_dir.name) / "agent" / "service.py"
+        source.write_text(
+            """
+class MediaService:
+    def resolve_attachment(self, stored_path: str) -> str:
+        \"\"\"Resolve a stored project-relative attachment path.\"\"\"
+        return stored_path
+""".strip(),
+            encoding="utf-8",
+        )
+        knowledge_base = ProjectKnowledgeBase(self.temp_dir.name)
+
+        hits = knowledge_base.search("resolve_attachment stored path", limit=5)
+
+        self.assertTrue(hits)
+        self.assertEqual(hits[0].source, "agent/service.py")
+        self.assertIn("MediaService.resolve_attachment", hits[0].heading)
+
+    def test_knowledge_index_refreshes_after_source_changes(self) -> None:
+        readme = Path(self.temp_dir.name) / "README.md"
+        knowledge_base = ProjectKnowledgeBase(self.temp_dir.name)
+        self.assertTrue(knowledge_base.search("RTSP 接入"))
+
+        readme.write_text(
+            "# 项目说明\n\n新增的媒体持久化卷用于保存历史图片。",
+            encoding="utf-8",
+        )
+
+        hits = knowledge_base.search("媒体持久化卷保存历史图片")
+
+        self.assertTrue(hits)
+        self.assertIn("媒体持久化卷", hits[0].excerpt)
+
 
 class OpenAICompatibleKnowledgeAnswererTests(unittest.TestCase):
     def test_classifier_returns_closed_request_mode(self) -> None:
@@ -446,6 +480,9 @@ class OpenAICompatibleKnowledgeAnswererTests(unittest.TestCase):
         self.assertEqual(request["repository_evidence"], evidence)
         self.assertEqual(request["answer_mode"], "user")
         self.assertNotIn("video_sources", request)
+        system_prompt = calls[0]["messages"][0]["content"]
+        self.assertIn("1至3句话", system_prompt)
+        self.assertIn("步骤不超过5条", system_prompt)
 
 
 if __name__ == "__main__":

@@ -44,8 +44,11 @@ function createMessage(role, text, isError = false, attachment = null) {
   return article;
 }
 
+let outputBaseUrl = "/outputs/";
+
 function outputPathToUrl(path) {
   const normalized = String(path || "").replaceAll("\\", "/");
+  if (/^(?:https?:|blob:|data:)/i.test(normalized)) return normalized;
   const marker = "/outputs/";
   const markerIndex = normalized.toLowerCase().lastIndexOf(marker);
   const relative = markerIndex >= 0
@@ -53,17 +56,19 @@ function outputPathToUrl(path) {
     : normalized.startsWith("outputs/")
       ? normalized.slice("outputs/".length)
       : normalized;
-  return `/outputs/${relative.split("/").map(encodeURIComponent).join("/")}`;
+  const base = outputBaseUrl.endsWith("/") ? outputBaseUrl : `${outputBaseUrl}/`;
+  return `${base}${relative.split("/").filter(Boolean).map(encodeURIComponent).join("/")}`;
 }
 
 function storedAttachmentPreview(attachment) {
   if (!attachment?.path) return null;
   return {
     media_type: attachment.media_type,
-    src: outputPathToUrl(attachment.preview_path || attachment.path),
-    poster: attachment.poster_path
+    src: attachment.preview_url || attachment.url
+      || outputPathToUrl(attachment.preview_path || attachment.path),
+    poster: attachment.poster_url || (attachment.poster_path
       ? outputPathToUrl(attachment.poster_path)
-      : "",
+      : ""),
   };
 }
 
@@ -537,6 +542,7 @@ function monitoringPathLabel(path) {
 export function mountAgentChat(root) {
   if (root.dataset.agentChatMounted === "true") return;
   root.dataset.agentChatMounted = "true";
+  outputBaseUrl = root.dataset.outputBaseUrl || outputBaseUrl;
   const form = root.querySelector("[data-agent-form]");
   const textarea = form.querySelector("textarea[name='message']");
   const mediaInput = form.querySelector("input[name='media']");
@@ -1413,7 +1419,9 @@ export function mountAgentChat(root) {
       const realtimeTask = findRealtimeTask(data);
       const realtimeId = String(realtimeTask?.task_id || findRealtimeTaskId(data) || "");
       if (realtimeId) activateRealtime(realtimeId, realtimeTask, sessionId);
-      document.dispatchEvent(new CustomEvent("agent:response", { detail: { data } }));
+      document.dispatchEvent(new CustomEvent("agent:response", {
+        detail: { data, realtimeTask },
+      }));
       if (data.attachment_received) {
         mediaInput.value = "";
         fileLabel.textContent = "";

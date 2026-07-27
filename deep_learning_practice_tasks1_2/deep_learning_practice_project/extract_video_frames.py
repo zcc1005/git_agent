@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from utils.media_files import save_content_addressed_upload
+
 if TYPE_CHECKING:
     from werkzeug.datastructures import FileStorage
 
@@ -289,11 +291,7 @@ def save_uploaded_video(file: FileStorage, upload_dir: Path = UPLOAD_DIR) -> Pat
         allowed = ", ".join(sorted(VIDEO_EXTENSIONS))
         raise ValueError(f"Unsupported video format. Allowed formats: {allowed}")
 
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    saved_path = upload_dir / f"{timestamp}_{_safe_filename(Path(original_name).stem)}{suffix}"
-    file.save(saved_path)
-    return saved_path
+    return save_content_addressed_upload(file, upload_dir, suffix)
 
 
 def create_upload_app():

@@ -226,7 +226,7 @@ MAIN_MONITOR_RTSP_URL=rtsp://127.0.0.1:8554/main-monitor
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\rtsp_simulator\setup.ps1 `
-  -PythonPath "C:\Users\你的用户名\anaconda3\envs\dl_practice\python.exe"
+  -PythonPath ".\.venv\Scripts\python.exe"
 ```
 
 启动循环推流：
@@ -343,6 +343,8 @@ skills/<skill-name>/references/contract.md
 
 不要手动删除正在运行任务使用的输出文件。清理历史录像时应使用系统的保留期机制，避免 SQLite 仍引用已被外部删除的片段。
 
+容器部署时必须持久化整个 `outputs/` 目录，因为 SQLite 会话记忆和对话框中的媒体文件都在这里。仓库根目录的 `compose.yaml` 已使用命名卷 `app_outputs` 挂载该目录；不要使用 `docker compose down -v`。上传文件按内容哈希去重，会话数据库只保存项目相对路径和元数据。
+
 ## 12. YOLO 数据与训练
 
 正式数据集默认位于 `data/yolo_yiwu/`，训练类别为：
@@ -425,6 +427,8 @@ python -m pytest -q tests/test_realtime_inspection.py
 ```
 
 测试使用假的读取器和检测器覆盖核心实时巡检逻辑，不要求连接真实 RTSP 或真实 YOLO。真实设备验收仍应额外检查 RTSP 连通性、抽帧速率、代表帧、报警闭环和长时间资源占用。
+
+知识问答优化后，可使用 [30 个常用问题测试清单](docs/KNOWLEDGE_QA_TEST_QUESTIONS.md) 做人工验收。清单覆盖上传媒体、检测逻辑、RTSP、报警、部署和开发实现，并附有每题期望要点。
 
 ## 15. 常见问题
 

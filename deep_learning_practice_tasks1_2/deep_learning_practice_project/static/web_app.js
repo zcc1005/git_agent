@@ -130,7 +130,7 @@ document.addEventListener("agent:response", (event) => {
   const response = event.detail?.data;
   if (!response || typeof response !== "object") return;
   const payload = response.data && typeof response.data === "object" ? response.data : {};
-  const realtimeTask = findRealtimeTask(response);
+  const realtimeTask = event.detail?.realtimeTask;
   if (realtimeTask) {
     setAgentTask("实时监测", realtimeTaskSentence(realtimeTask));
     return;

@@ -343,6 +343,8 @@ skills/<skill-name>/references/contract.md
 
 不要手动删除正在运行任务使用的输出文件。清理历史录像时应使用系统的保留期机制，避免 SQLite 仍引用已被外部删除的片段。
 
+容器部署时必须持久化整个 `outputs/` 目录，因为 SQLite 会话记忆和对话框中的媒体文件都在这里。仓库的 `compose.yaml` 已使用命名卷 `app_outputs` 挂载到容器内的 `outputs/`；不要使用 `docker compose down -v`，否则会同时删除历史和媒体。新上传文件按内容哈希去重，SQLite 只保存项目相对路径和元数据，不保存图片、视频二进制或 Base64。
+
 ## 12. YOLO 数据与训练
 
 正式数据集默认位于 `data/yolo_yiwu/`，训练类别为：

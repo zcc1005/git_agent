@@ -25,7 +25,12 @@ from agent.video_sources import (
     LongVideoSourceRegistry,
     load_video_source_registry,
 )
-from project_config import OUTPUTS_DIR, PROJECT_ROOT, YOLO_MODEL_PATH
+from project_config import (
+    OUTPUTS_DIR,
+    PROJECT_ROOT,
+    YOLO_MODEL_PATH,
+    portable_project_path,
+)
 from storage import AlarmRecord, RealtimeInspectionTaskRecord, SQLiteHistoryStore
 
 from .archive import HistoricalStreamArchiveManager
@@ -2128,7 +2133,7 @@ class AgentTools:
         detection_record, alarm_record = self.store.record_detection(
             session_id,
             source_type="image",
-            source_path=str(image_path),
+            source_path=portable_project_path(image_path),
             detection=stored_detection,
             alarm_document=outcome.alarm_document,
             alarm_report=outcome.alarm_report,
@@ -2230,7 +2235,7 @@ class AgentTools:
         detection_record, alarm_record = self.store.record_detection(
             session_id,
             source_type="video",
-            source_path=str(video_path),
+            source_path=portable_project_path(video_path),
             detection=outcome.detection,
             alarm_document=outcome.alarm_document,
             alarm_report=outcome.alarm_report,
@@ -2923,7 +2928,4 @@ class AgentTools:
 
     @staticmethod
     def _display_path(path: Path) -> str:
-        try:
-            return str(path.resolve().relative_to(PROJECT_ROOT))
-        except ValueError:
-            return str(path)
+        return portable_project_path(path)

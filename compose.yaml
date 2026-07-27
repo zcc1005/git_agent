@@ -3,9 +3,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - ./deep_learning_practice_tasks1_2/deep_learning_practice_project/.env
     environment:
       HOST: 0.0.0.0
       PORT: "5000"
     ports:
       - "8080:5000"
+    volumes:
+      - app_outputs:/app/outputs
     command: ["python", "web_app.py"]
+
+volumes:
+  app_outputs:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import math
 import re
@@ -10,17 +11,70 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Protocol, Sequence
 
 TRUSTED_CODE_SOURCES = (
     "project_config.py",
+    "main_pipeline.py",
+    "extract_video_frames.py",
     "video_detection.py",
     "web_app.py",
     "agent/archive.py",
+    "agent/intents.py",
+    "agent/knowledge_base.py",
+    "agent/llm_api.py",
     "agent/monitoring.py",
     "agent/realtime_inspection.py",
+    "agent/router.py",
+    "agent/service.py",
     "agent/streaming.py",
+    "agent/tools.py",
     "agent/video_sources.py",
+    "agent/skills/builtin.py",
     "agent/skills/schemas.py",
+    "storage/sqlite_store.py",
     "task2_yolo/detect_yolo.py",
     "task3_alarm/alarm_rule_engine.py",
     "task3_alarm/unified_alarm.py",
+    "utils/media_files.py",
+)
+
+TRUSTED_UI_SOURCES = (
+    "static/agent_chat/agent_chat.js",
+    "templates/components/agent_chat.html",
+    "templates/web_index.html",
+)
+
+EXCLUDED_KNOWLEDGE_DOCS = {
+    "knowledge_qa_test_questions.md",
+}
+
+SOURCE_QUERY_HINTS = (
+    (
+        re.compile(r"(?:上传|图片|视频|媒体|附件|显示|预览|对话框|路径|upload|image|video|media|preview)", re.I),
+        ("web_app.py", "agent/service.py", "static/agent_chat/", "utils/media_files.py"),
+    ),
+    (
+        re.compile(r"(?:问答|回答|知识库|检索|不切题|大模型|提示词|knowledge|answer|retrieval|llm)", re.I),
+        ("agent/knowledge_base.py", "agent/llm_api.py", "agent/service.py"),
+    ),
+    (
+        re.compile(r"(?:历史|记忆|数据库|sqlite|保存记录|报警记录)", re.I),
+        ("storage/sqlite_store.py", "agent/service.py", "agent/tools.py"),
+    ),
+    (
+        re.compile(r"(?:实时巡检|监控|rtsp|断流|重连|录像|归档)", re.I),
+        (
+            "agent/realtime_inspection.py",
+            "agent/streaming.py",
+            "agent/archive.py",
+            "agent/video_sources.py",
+        ),
+    ),
+    (
+        re.compile(r"(?:检测|yolo|置信度|阈值|抽帧|sample_fps|known_conf|unknown|代表帧)", re.I),
+        ("video_detection.py", "task2_yolo/detect_yolo.py", "agent/tools.py"),
+    ),
+    (
+        re.compile(r"(?:报警|风险|确认|取消|规则)", re.I),
+        ("task3_alarm/alarm_rule_engine.py", "task3_alarm/unified_alarm.py", "agent/tools.py"),
+    ),
 )
 
 QUERY_EXPANSIONS = {
@@ -52,6 +106,18 @@ QUERY_EXPANSIONS = {
     "mediamtx": "MediaMTX RTSP 8554 main-monitor",
     "ffmpeg": "FFmpeg 循环推流 RTSP MediaMTX",
     "web服务": "python web_app.py 127.0.0.1 5000",
+    "上传": "upload media attachment save_uploaded_image_file save_uploaded_video outputs agent_inputs",
+    "显示": "outputPathToUrl path_to_output_url enrich_attachment_urls send_from_directory preview_url",
+    "对话框": "agent_chat attachment media preview outputPathToUrl",
+    "问答": "project_knowledge knowledge_answerer answer_project_question repository_evidence retrieval",
+    "知识库": "ProjectKnowledgeBase knowledge_answerer repository_evidence search chunks",
+    "大模型": "OpenAICompatibleKnowledgeAnswerer answer_project_question LLM planner",
+    "容器": "Docker compose outputs volume portable_project_path deployment",
+    "部署": "Docker compose outputs volume relative path model weights",
+    "去重": "save_content_addressed_upload sha256 content hash media_files",
+    "重复上传": "save_content_addressed_upload sha256 content hash media_files deduplicate",
+    "两份": "save_content_addressed_upload sha256 content hash media_files deduplicate",
+    "绝对路径": "portable_project_path resolve_runtime_path outputs relative path",
 }
 
 STOP_TOKENS = {
@@ -119,10 +185,18 @@ SOURCE_LABELS = {
     "readme.md": "项目使用说明",
     "config/readme.md": "监控配置说明",
     "config/video_sources.json": "监控源配置说明",
+    "agent/knowledge_base.py": "项目知识检索实现",
+    "agent/llm_api.py": "大模型问答实现",
+    "agent/service.py": "智能体对话路由实现",
+    "agent/tools.py": "智能体工具实现",
     "agent/realtime_inspection.py": "持续实时巡检说明",
     "agent/monitoring.py": "周期巡检说明",
     "agent/streaming.py": "录像归档说明",
     "agent/video_sources.py": "监控源说明",
+    "storage/sqlite_store.py": "历史记录存储实现",
+    "web_app.py": "Web 接口实现",
+    "static/agent_chat/agent_chat.js": "对话框前端实现",
+    "utils/media_files.py": "上传文件存储实现",
     "task3_alarm/alarm_rule_engine.py": "风险研判说明",
     "task3_alarm/unified_alarm.py": "报警报告说明",
     "task2_yolo/detect_yolo.py": "异物检测说明",
@@ -192,6 +266,7 @@ class ProjectKnowledgeBase:
         self._chunks: Optional[list[KnowledgeChunk]] = None
         self._chunk_tokens: list[set[str]] = []
         self._document_frequency: Dict[str, int] = {}
+        self._index_signature: tuple[tuple[str, int, int], ...] = ()
 
     def trusted_sources(self) -> list[str]:
         return [self._relative(path) for path in self._trusted_paths()]
@@ -206,36 +281,56 @@ class ProjectKnowledgeBase:
         self._ensure_index()
         assert self._chunks is not None
         expanded = self._expand_query(query)
+        original_tokens = self._tokens(query)
         query_tokens = self._tokens(expanded)
         if not query_tokens:
             return []
         total_chunks = max(1, len(self._chunks))
         query_weight = sum(self._idf(token, total_chunks) for token in query_tokens)
+        original_weight = sum(
+            self._idf(token, total_chunks) for token in original_tokens
+        )
         normalized_query = self._normalize(query)
+        source_hints = self._source_hints(query)
         ranked: list[KnowledgeHit] = []
         for chunk, tokens in zip(self._chunks, self._chunk_tokens):
             overlap = query_tokens & tokens
-            if not overlap:
+            normalized_source = chunk.source.replace("\\", "/").lower()
+            source_is_hint = any(
+                normalized_source == hint or normalized_source.startswith(hint)
+                for hint in source_hints
+            )
+            if not overlap and not source_is_hint:
                 continue
             overlap_weight = sum(self._idf(token, total_chunks) for token in overlap)
-            score = overlap_weight / max(query_weight, 1e-6)
+            original_overlap = original_tokens & tokens
+            original_overlap_weight = sum(
+                self._idf(token, total_chunks) for token in original_overlap
+            )
+            score = 0.35 * overlap_weight / max(query_weight, 1e-6)
+            score += 0.65 * original_overlap_weight / max(original_weight, 1e-6)
             # Exact technical identifiers such as SQLite, RTSP and sample_fps are
             # strong evidence even when surrounded by unmatched colloquial text.
-            if any(re.fullmatch(r"[a-z0-9_./-]{2,}", token) for token in overlap):
+            if any(
+                re.fullmatch(r"[a-z0-9_./-]{2,}", token)
+                for token in original_overlap
+            ):
                 score += 0.18
             normalized_text = self._normalize(f"{chunk.heading} {chunk.text}")
             if normalized_query and len(normalized_query) >= 4 and normalized_query in normalized_text:
                 score += 0.35
             heading_tokens = self._tokens(chunk.heading)
-            if query_tokens & heading_tokens:
-                score += 0.08
+            if original_tokens & heading_tokens:
+                score += 0.16
+            if source_is_hint:
+                score += 0.20
             if score < min_score:
                 continue
             ranked.append(
                 KnowledgeHit(
                     source=chunk.source,
                     heading=chunk.heading,
-                    excerpt=chunk.text[:1800].strip(),
+                    excerpt=chunk.text[:2200].strip(),
                     score=score,
                 )
             )
@@ -324,9 +419,11 @@ class ProjectKnowledgeBase:
         steps = section("steps")
         note = section("note") or self._attention_note(query)
         parts = [direct or "这个问题可以通过系统现有功能处理。"]
-        parts.append(
-            f"操作步骤：\n{steps}" if steps else self._operation_steps(query)
-        )
+        operation_steps = steps or self._operation_steps(query)
+        if operation_steps:
+            parts.append(
+                f"操作步骤：\n{operation_steps}" if steps else operation_steps
+            )
         if note:
             parts.append(f"注意事项：{note}")
         return "\n\n".join(parts).strip()
@@ -452,7 +549,7 @@ class ProjectKnowledgeBase:
             return (
                 "操作步骤：在聊天框输入“查看当前报警”；确认现场情况后，再选择确认报警或取消报警。"
             )
-        return "操作步骤：在聊天框直接说明要查看的功能、监控对象和时间范围即可。"
+        return ""
 
     @staticmethod
     def _attention_note(query: str) -> str:
@@ -466,10 +563,21 @@ class ProjectKnowledgeBase:
         return ""
 
     def _ensure_index(self) -> None:
-        if self._chunks is not None:
+        trusted_paths = self._trusted_paths()
+        signature_items: list[tuple[str, int, int]] = []
+        for path in trusted_paths:
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            signature_items.append(
+                (self._relative(path), int(stat.st_mtime_ns), int(stat.st_size))
+            )
+        signature = tuple(signature_items)
+        if self._chunks is not None and signature == self._index_signature:
             return
         chunks: list[KnowledgeChunk] = []
-        for path in self._trusted_paths():
+        for path in trusted_paths:
             try:
                 text = path.read_text(encoding="utf-8")
             except (OSError, UnicodeError):
@@ -477,6 +585,7 @@ class ProjectKnowledgeBase:
             source = self._relative(path)
             chunks.extend(self._split_document(source, text, path.suffix.lower()))
         self._chunks = chunks
+        self._index_signature = signature
         self._chunk_tokens = [self._tokens(f"{item.heading} {item.text}") for item in chunks]
         frequency: Dict[str, int] = {}
         for tokens in self._chunk_tokens:
@@ -491,11 +600,17 @@ class ProjectKnowledgeBase:
             self.root / "config" / "README.md",
             self.root / "config" / "video_sources.json",
             *(self.root / name for name in TRUSTED_CODE_SOURCES),
+            *(self.root / name for name in TRUSTED_UI_SOURCES),
         ]
         paths.extend(path for path in direct if path.is_file())
         docs = self.root / "docs"
         if docs.is_dir():
-            paths.extend(path for path in docs.rglob("*.md") if path.is_file())
+            paths.extend(
+                path
+                for path in docs.rglob("*.md")
+                if path.is_file()
+                and path.name.lower() not in EXCLUDED_KNOWLEDGE_DOCS
+            )
         skills = self.root / "skills"
         if skills.is_dir():
             paths.extend(path for path in skills.glob("*/SKILL.md") if path.is_file())
@@ -517,12 +632,129 @@ class ProjectKnowledgeBase:
     ) -> list[KnowledgeChunk]:
         if suffix == ".md":
             return self._split_markdown(source, text)
+        if suffix == ".py":
+            return self._split_python(source, text)
         if suffix == ".json":
             try:
                 text = json.dumps(json.loads(text), ensure_ascii=False, indent=2)
             except json.JSONDecodeError:
                 pass
         return self._split_blocks(source, text, heading=source)
+
+    def _split_python(self, source: str, text: str) -> list[KnowledgeChunk]:
+        """Split Python by symbols so retrieved evidence contains complete logic."""
+
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return self._split_blocks(source, text, heading=source)
+
+        lines = text.splitlines()
+        chunks: list[KnowledgeChunk] = []
+        symbol_nodes = [
+            node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        ]
+        first_symbol_line = min(
+            (node.lineno for node in symbol_nodes),
+            default=len(lines) + 1,
+        )
+        preamble = "\n".join(lines[: first_symbol_line - 1]).strip()
+        module_parts: list[str] = [preamble] if preamble else []
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if (node.end_lineno or node.lineno) < first_symbol_line:
+                continue
+            segment = "\n".join(
+                lines[node.lineno - 1 : node.end_lineno or node.lineno]
+            )
+            if segment:
+                module_parts.append(segment)
+        if module_parts:
+            chunks.extend(
+                self._split_blocks(
+                    source,
+                    "\n\n".join(module_parts),
+                    heading=f"{source} module configuration",
+                    max_chars=2200,
+                )
+            )
+
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                chunks.extend(
+                    self._python_symbol_chunks(
+                        source,
+                        lines,
+                        node,
+                        symbol_name=node.name,
+                        symbol_kind="function",
+                    )
+                )
+                continue
+            if not isinstance(node, ast.ClassDef):
+                continue
+
+            methods = [
+                member
+                for member in node.body
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+            ]
+            first_method_line = min(
+                (member.lineno for member in methods),
+                default=(node.end_lineno or node.lineno) + 1,
+            )
+            overview_end = max(node.lineno, first_method_line - 1)
+            overview = "\n".join(lines[node.lineno - 1 : overview_end]).strip()
+            if overview:
+                chunks.extend(
+                    self._split_blocks(
+                        source,
+                        overview,
+                        heading=(
+                            f"class {node.name} "
+                            f"(lines {node.lineno}-{overview_end})"
+                        ),
+                        max_chars=2200,
+                    )
+                )
+            for method in methods:
+                chunks.extend(
+                    self._python_symbol_chunks(
+                        source,
+                        lines,
+                        method,
+                        symbol_name=f"{node.name}.{method.name}",
+                        symbol_kind="method",
+                    )
+                )
+        return chunks or self._split_blocks(source, text, heading=source)
+
+    def _python_symbol_chunks(
+        self,
+        source: str,
+        lines: Sequence[str],
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+        *,
+        symbol_name: str,
+        symbol_kind: str,
+    ) -> list[KnowledgeChunk]:
+        segment = "\n".join(
+            lines[node.lineno - 1 : node.end_lineno or node.lineno]
+        )
+        end_line = node.end_lineno or node.lineno
+        heading = (
+            f"{symbol_kind} {symbol_name} "
+            f"(lines {node.lineno}-{end_line})"
+        )
+        return self._split_blocks(
+            source,
+            segment,
+            heading=heading,
+            max_chars=2200,
+        )
 
     def _split_markdown(self, source: str, text: str) -> list[KnowledgeChunk]:
         sections: list[tuple[str, str]] = []
@@ -587,6 +819,14 @@ class ProjectKnowledgeBase:
         normalized = query.lower()
         additions = [value for key, value in QUERY_EXPANSIONS.items() if key in normalized]
         return " ".join([query, *additions])
+
+    @staticmethod
+    def _source_hints(query: str) -> set[str]:
+        hints: set[str] = set()
+        for pattern, sources in SOURCE_QUERY_HINTS:
+            if pattern.search(query):
+                hints.update(source.lower() for source in sources)
+        return hints
 
     @staticmethod
     def _normalize(text: str) -> str:

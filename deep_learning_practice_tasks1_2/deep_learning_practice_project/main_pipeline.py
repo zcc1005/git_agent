@@ -11,6 +11,7 @@ from typing import Any, Dict
 from project_config import (
     PROJECT_ROOT,
     YOLO_MODEL_PATH,
+    portable_project_path,
     resolve_project_path,
 )
 
@@ -37,10 +38,7 @@ DEFAULT_YOLO_MODEL = YOLO_MODEL_PATH
 
 
 def display_path(path: Path) -> str:
-    try:
-        return str(path.resolve().relative_to(PROJECT_ROOT))
-    except ValueError:
-        return str(path)
+    return portable_project_path(path)
 
 
 def write_manual_command(command: str) -> Path:

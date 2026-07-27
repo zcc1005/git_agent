@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional
 
-from project_config import OUTPUTS_DIR
+from project_config import OUTPUTS_DIR, portable_project_path
 
 from .video_sources import LongVideoSource
 
@@ -551,8 +551,8 @@ class RtspStreamCapture:
                 output_codec="mp4v",
                 backend=adapter._backend_name(capture),
                 transport=transport,
-                video_path=str(final_video_path.resolve()),
-                metadata_path=str(metadata_path.resolve()),
+                video_path=portable_project_path(final_video_path),
+                metadata_path=portable_project_path(metadata_path),
             )
             temp_metadata_path.write_text(
                 json.dumps(result.to_dict(), ensure_ascii=False, indent=2),

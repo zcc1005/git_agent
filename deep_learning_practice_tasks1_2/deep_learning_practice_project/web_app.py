@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping
 
 import cv2
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, render_template, request, send_from_directory, url_for
 from werkzeug.utils import secure_filename
 
 from agent import AgentService, AgentTools
@@ -16,6 +16,7 @@ from agent.llm_api import (
     LLMAPIConfig,
     OpenAICompatibleClient,
     OpenAICompatibleDetectionExplainer,
+    OpenAICompatibleKnowledgeAnswerer,
     OpenAICompatibleSkillPlanner,
     load_env_file,
 )
@@ -32,9 +33,11 @@ from main_pipeline import (
     write_manual_command,
     write_skipped_alarm_report,
 )
+from project_config import portable_project_path, resolve_runtime_path
 from task2_yolo.detect_yolo import detect_yiwu, make_skipped_json, read_command, should_start_detection
 from task3_alarm.alarm_rule_engine import complete_detection_alarm
 from storage import AlarmRecord, SQLiteHistoryStore
+from utils.media_files import save_content_addressed_upload
 from video_detection import (
     DEFAULT_DUPLICATE_IOU,
     DEFAULT_EVENT_SILENCE_SECONDS,
@@ -163,10 +166,7 @@ def create_browser_video_assets(video_path: Path) -> Dict[str, str]:
 
 
 def display_path(path: Path) -> str:
-    try:
-        return str(path.resolve().relative_to(PROJECT_ROOT))
-    except ValueError:
-        return str(path)
+    return portable_project_path(path)
 
 
 def read_json_file(path: Path) -> Dict[str, Any]:
@@ -191,14 +191,7 @@ def save_uploaded_image_file(file, upload_dir: Path = UPLOAD_DIR) -> Path:
     suffix = Path(safe_name).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise ValueError("仅支持 jpg、jpeg、png、bmp、webp 格式图片。")
-    safe_stem = Path(safe_name).stem[:80] or "image"
-    original_name = f"{safe_stem}{suffix}"
-
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    image_path = upload_dir / f"{timestamp}_{original_name}"
-    file.save(image_path)
-    return image_path
+    return save_content_addressed_upload(file, upload_dir, suffix)
 
 
 def save_uploaded_image() -> Path:
@@ -233,11 +226,32 @@ def find_latest_visualization_image() -> Path | None:
     return max(images, key=lambda item: item.stat().st_mtime)
 
 
-def path_to_output_url(path: Path | None) -> str | None:
-    if path is None or not path.exists():
+def path_to_output_url(path: str | Path | None) -> str | None:
+    if path in (None, ""):
         return None
-    rel = path.resolve().relative_to(OUTPUTS_DIR.resolve()).as_posix()
-    return f"/outputs/{rel}"
+    try:
+        runtime_path = resolve_runtime_path(str(path), require_project_path=True)
+        if not runtime_path.is_file():
+            return None
+        rel = runtime_path.relative_to(OUTPUTS_DIR.resolve()).as_posix()
+    except (OSError, ValueError):
+        return None
+    return url_for("output_file", filename=rel)
+
+
+def enrich_attachment_urls(attachment: Any) -> None:
+    """Add request-local URLs without storing a machine-specific origin."""
+
+    if not isinstance(attachment, dict):
+        return
+    for path_field, url_field in (
+        ("path", "url"),
+        ("preview_path", "preview_url"),
+        ("poster_path", "poster_url"),
+    ):
+        media_url = path_to_output_url(attachment.get(path_field))
+        if media_url:
+            attachment[url_field] = media_url
 
 
 def build_video_response(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -421,12 +435,14 @@ def create_web_agent_service() -> AgentService:
         load_env_file(PROJECT_ROOT / ".env")
         client = OpenAICompatibleClient(LLMAPIConfig.from_env())
         planner = OpenAICompatibleSkillPlanner(client)
+        knowledge_answerer = OpenAICompatibleKnowledgeAnswerer(client)
         agent_tools.set_detection_explainer(OpenAICompatibleDetectionExplainer(client))
         service = AgentService(
             agent_history_store,
             tools=agent_tools,
             skill_planner=planner,
             skill_planner_mode=os.getenv("LLM_PLANNER_MODE", "hybrid"),
+            knowledge_answerer=knowledge_answerer,
         )
     except (OSError, ValueError) as exc:
         agent_tools.set_detection_explainer(None)
@@ -1013,14 +1029,15 @@ def api_agent_chat():
                     original_name=original_name,
                     context=context,
                 )
-                return jsonify(response)
-            response = get_agent_service().chat(
-                message,
-                session_id=session_id,
-                context=context,
-            )
+            else:
+                response = get_agent_service().chat(
+                    message,
+                    session_id=session_id,
+                    context=context,
+                )
             if has_media:
                 response["attachment_received"] = True
+            enrich_attachment_urls(response.get("attachment"))
         return jsonify(response)
     except (ValueError, FileNotFoundError) as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
@@ -1044,13 +1061,19 @@ def api_agent_history():
                 continue
             enrich_alarm_report_data(metadata.get("data"))
             attachment = metadata.get("attachment")
-            if not isinstance(attachment, dict) or attachment.get("media_type") != "video":
+            if not isinstance(attachment, dict):
                 continue
-            video_path = Path(str(attachment.get("path") or ""))
-            preview_path, poster_path = browser_video_asset_paths(video_path)
-            if preview_path.is_file() and poster_path.is_file():
-                attachment.setdefault("preview_path", str(preview_path))
-                attachment.setdefault("poster_path", str(poster_path))
+            if attachment.get("media_type") == "video":
+                try:
+                    video_path = resolve_runtime_path(str(attachment.get("path") or ""))
+                except ValueError:
+                    pass
+                else:
+                    preview_path, poster_path = browser_video_asset_paths(video_path)
+                    if preview_path.is_file() and poster_path.is_file():
+                        attachment.setdefault("preview_path", display_path(preview_path))
+                        attachment.setdefault("poster_path", display_path(poster_path))
+            enrich_attachment_urls(attachment)
         return jsonify({"ok": True, "session_id": session_id, "messages": messages})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

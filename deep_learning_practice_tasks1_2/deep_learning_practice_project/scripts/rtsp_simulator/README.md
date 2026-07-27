@@ -13,7 +13,7 @@
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\rtsp_simulator\setup.ps1 `
-  -PythonPath "C:\Users\你的用户名\anaconda3\envs\dl_practice\python.exe"
+  -PythonPath "..\..\.venv\Scripts\python.exe"
 ```
 
 FFmpeg 可由项目 Python 环境中的 `imageio-ffmpeg` 提供。MediaMTX 需要从官方 Release 下载 Windows amd64 压缩包，解压到上面的目录。`.local/` 已被 Git 忽略。
@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\rtsp_simulator\start.ps1 `
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\rtsp_simulator\start.ps1 `
-  -VideoPath "D:\videos\belt.mp4" `
+  -VideoPath ".\samples\belt.mp4" `
   -StreamName main-monitor
 ```
 

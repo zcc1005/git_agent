@@ -269,6 +269,37 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertNotIn('id="agentPhaseTrack"', html)
         self.assertNotIn('<span class="active">理解</span>', html)
 
+    def test_web_service_wires_llm_knowledge_answerer(self) -> None:
+        from web_app import create_web_agent_service
+
+        client = Mock()
+        planner = Mock()
+        answerer = Mock()
+        explainer = Mock()
+        with (
+            patch("web_app.load_env_file"),
+            patch("web_app.LLMAPIConfig.from_env", return_value=Mock()),
+            patch("web_app.OpenAICompatibleClient", return_value=client),
+            patch("web_app.OpenAICompatibleSkillPlanner", return_value=planner),
+            patch(
+                "web_app.OpenAICompatibleKnowledgeAnswerer",
+                return_value=answerer,
+            ),
+            patch(
+                "web_app.OpenAICompatibleDetectionExplainer",
+                return_value=explainer,
+            ),
+            patch.object(
+                __import__("web_app").agent_tools,
+                "set_detection_explainer",
+            ) as set_explainer,
+        ):
+            service = create_web_agent_service()
+
+        self.assertIs(service.skill_planner, planner)
+        self.assertIs(service.knowledge_answerer, answerer)
+        set_explainer.assert_called_once_with(explainer)
+
     def test_realtime_frontend_uses_sqlite_cursor_dedupe_and_updates_closed_card(self) -> None:
         script = (
             Path(__file__).resolve().parents[1] / "static" / "agent_chat" / "agent_chat.js"
@@ -372,6 +403,20 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertIn('正在实时巡检${source}，时间：${start} 至 ${end}。', script)
         self.assertIn('item?.sourceName === "智能体任务"', script)
         self.assertNotIn('setAgentPhase(', script)
+
+    def test_agent_response_passes_realtime_task_across_module_boundary(self) -> None:
+        static_dir = Path(__file__).resolve().parents[1] / "static"
+        dashboard_script = (static_dir / "web_app.js").read_text(encoding="utf-8")
+        chat_script = (
+            static_dir / "agent_chat" / "agent_chat.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("detail: { data, realtimeTask }", chat_script)
+        self.assertIn(
+            "const realtimeTask = event.detail?.realtimeTask;",
+            dashboard_script,
+        )
+        self.assertNotIn("findRealtimeTask(response)", dashboard_script)
 
     def test_alarm_center_supports_free_navigation_bulk_action_and_sqlite_snapshot(self) -> None:
         script = (
@@ -600,14 +645,28 @@ class AgentWebIntegrationTests(unittest.TestCase):
     def test_image_upload_with_long_name_is_safely_truncated(self) -> None:
         uploaded = Mock()
         uploaded.filename = f"{'very_long_image_name_' * 20}.jpg"
+        uploaded.save.side_effect = lambda path: Path(path).write_bytes(b"same-image")
 
         from web_app import save_uploaded_image_file
 
-        saved_path = save_uploaded_image_file(uploaded)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_path = save_uploaded_image_file(uploaded, Path(temp_dir))
 
-        self.assertLessEqual(len(saved_path.stem), 80 + 23)
-        self.assertEqual(saved_path.suffix, ".jpg")
-        uploaded.save.assert_called_once_with(saved_path)
+            self.assertEqual(len(saved_path.stem), 24)
+            self.assertEqual(saved_path.suffix, ".jpg")
+        uploaded.save.assert_called_once()
+
+    def test_attachment_urls_are_generated_from_relative_output_paths(self) -> None:
+        from web_app import enrich_attachment_urls
+
+        attachment = {
+            "media_type": "image",
+            "path": "outputs/agent_inputs/images/example.jpg",
+        }
+        with patch("web_app.path_to_output_url", return_value="/outputs/example.jpg"):
+            enrich_attachment_urls(attachment)
+
+        self.assertEqual(attachment["url"], "/outputs/example.jpg")
 
     def test_history_endpoint_returns_persisted_messages(self) -> None:
         response = self.client.get(

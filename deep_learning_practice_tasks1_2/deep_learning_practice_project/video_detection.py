@@ -18,7 +18,7 @@ os.environ.setdefault(
 import cv2
 from ultralytics import YOLO
 
-from project_config import PROJECT_ROOT
+from project_config import PROJECT_ROOT, portable_project_path
 from task2_yolo.detect_yolo import (
     VIS_COLORS,
     normalize_class_name,
@@ -92,10 +92,7 @@ def sample_source_index(
 
 
 def _project_path(path: Path) -> str:
-    try:
-        return path.resolve().relative_to(PROJECT_ROOT.resolve()).as_posix()
-    except ValueError:
-        return str(path.resolve())
+    return portable_project_path(path)
 
 
 def _bbox_area(bbox: Sequence[float]) -> float:
