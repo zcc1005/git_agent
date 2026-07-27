@@ -125,6 +125,7 @@ YOLO_MODEL_PATH = env_path(
     "YOLO_MODEL_PATH",
     YOLO_RUN_DIR / YOLO_RUN_NAME / "weights" / "best.pt",
 )
+YOLO_DEVICE = env_text("YOLO_DEVICE", "").strip()
 VIDEO_SOURCES_PATH = env_path(
     "VIDEO_SOURCES_PATH",
     CONFIG_DIR / "video_sources.json",

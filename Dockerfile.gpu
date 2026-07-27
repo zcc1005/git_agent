@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1
+
+# CUDA 12.1 requires an NVIDIA Linux driver compatible with CUDA 12.x.
+# The deployment pipeline performs a real `torch.cuda.is_available()` smoke
+# test before replacing the running application.
+FROM pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    YOLO_MODEL_PATH=/models/best.pt \
+    YOLO_DEVICE=0 \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 \
+        libsm6 \
+        libxext6 \
+        libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY deep_learning_practice_tasks1_2/deep_learning_practice_project/requirements.txt ./requirements.txt
+
+# torch is already supplied by the CUDA-enabled PyTorch base image. Since the
+# installed version satisfies requirements.txt, pip keeps that CUDA build.
+RUN python -m pip install --upgrade pip \
+    && python -m pip install -r requirements.txt \
+    && python -c "import torch; assert torch.version.cuda is not None, 'CUDA-enabled PyTorch is missing'; print('torch', torch.__version__, 'built for CUDA', torch.version.cuda)"
+
+COPY deep_learning_practice_tasks1_2/deep_learning_practice_project/ ./
+
+RUN mkdir -p /app/outputs /app/runs /models
+COPY deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/yiwu_yolov8s_4class/weights/best.pt /models/best.pt
+RUN test -s /models/best.pt
+
+VOLUME ["/app/outputs"]
+
+EXPOSE 5000
+
+CMD ["python", "web_app.py"]

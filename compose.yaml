@@ -1,17 +1,92 @@
 services:
+  rtsp:
+    image: bluenviron/mediamtx:1
+    volumes:
+      - type: bind
+        source: ${MEDIAMTX_CONFIG_PATH:-./deploy/mediamtx.yml}
+        target: /mediamtx.yml
+        read_only: true
+    ports:
+      - "127.0.0.1:${RTSP_HOST_PORT:-8554}:8554"
+    restart: unless-stopped
+
+  rtsp-publisher:
+    image: jrottenberg/ffmpeg:7.1-alpine
+    depends_on:
+      rtsp:
+        condition: service_started
+    volumes:
+      - type: bind
+        source: ${DEMO_VIDEO_PATH:-./deep_learning_practice_tasks1_2/deep_learning_practice_project/data/monitor/monitor.mp4}
+        target: /media/demo.mp4
+        read_only: true
+    command:
+      - -hide_banner
+      - -loglevel
+      - warning
+      - -nostdin
+      - -re
+      - -stream_loop
+      - "-1"
+      - -i
+      - /media/demo.mp4
+      - -map
+      - 0:v:0
+      - -an
+      - -c:v
+      - libx264
+      - -preset
+      - veryfast
+      - -tune
+      - zerolatency
+      - -pix_fmt
+      - yuv420p
+      - -g
+      - "30"
+      - -keyint_min
+      - "30"
+      - -sc_threshold
+      - "0"
+      - -f
+      - rtsp
+      - -rtsp_transport
+      - tcp
+      - rtsp://rtsp:8554/main-monitor
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          ffprobe -v error -rtsp_transport tcp
+          -select_streams v:0 -show_entries stream=codec_type
+          -of csv=p=0 rtsp://rtsp:8554/main-monitor | grep -q video
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
   web:
+    image: ${WEB_IMAGE:-belt-agent:latest}
     build:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - ./deep_learning_practice_tasks1_2/deep_learning_practice_project/.env
+      - ${APP_ENV_FILE:-./deep_learning_practice_tasks1_2/deep_learning_practice_project/.env}
     environment:
       HOST: 0.0.0.0
       PORT: "5000"
+      YOLO_MODEL_PATH: /models/best.pt
+      MAIN_MONITOR_RTSP_URL: rtsp://rtsp:8554/main-monitor
+    depends_on:
+      rtsp-publisher:
+        condition: service_healthy
     ports:
       - "8080:5000"
     volumes:
       - app_outputs:/app/outputs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
     command: ["python", "web_app.py"]
 
 volumes:

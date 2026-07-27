@@ -22,6 +22,18 @@ deep_learning_practice_tasks1_2/deep_learning_practice_project/outputs/
 deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/
 deep_learning_practice_tasks1_2/deep_learning_practice_project/data/
 
+# Include only the production detection weight. Keeping all other runs ignored
+# avoids duplicating checkpoints and training artifacts in the image.
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/*
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/*
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/yiwu_yolov8s_4class/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/yiwu_yolov8s_4class/*
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/yiwu_yolov8s_4class/weights/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/yiwu_yolov8s_4class/weights/*
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/yiwu_yolov8s_4class/weights/best.pt
+
 # Local logs and editor files
 **/*.log
 **/.idea/

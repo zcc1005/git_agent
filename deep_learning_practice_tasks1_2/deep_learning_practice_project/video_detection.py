@@ -18,7 +18,7 @@ os.environ.setdefault(
 import cv2
 from ultralytics import YOLO
 
-from project_config import PROJECT_ROOT, portable_project_path
+from project_config import PROJECT_ROOT, YOLO_DEVICE, portable_project_path
 from task2_yolo.detect_yolo import (
     VIS_COLORS,
     normalize_class_name,
@@ -814,6 +814,7 @@ def detect_video_foreign_objects(
                 agnostic_nms=agnostic_nms,
                 save=False,
                 verbose=False,
+                **({"device": YOLO_DEVICE} if YOLO_DEVICE else {}),
             )[0]
             raw_objects = _raw_result_objects(result, offset_x=offset_x, offset_y=offset_y)
             processed = process_frame_objects(

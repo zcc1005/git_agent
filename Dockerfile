@@ -8,7 +8,8 @@ FROM python:3.11-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    YOLO_MODEL_PATH=/models/best.pt
 
 # OpenCV and the video pipeline need these system libraries.  ffmpeg is also
 # used for uploaded videos and RTSP capture.
@@ -35,10 +36,15 @@ RUN python -m pip install --upgrade pip \
 # root.  The .dockerignore keeps generated data and reports out of this copy.
 COPY deep_learning_practice_tasks1_2/deep_learning_practice_project/ ./
 
-# Runtime output, uploaded files, and model weights should be supplied by the
-# deployment (for example, with a mounted volume or YOLO_MODEL_PATH).
+# Package only the production best.pt rather than every training run/checkpoint.
+# API keys are intentionally not copied into the image; inject them at runtime.
 RUN mkdir -p /app/outputs /app/runs /models
-VOLUME ["/app/outputs", "/models"]
+COPY deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/yiwu_yolov8s_4class/weights/best.pt /models/best.pt
+RUN test -s /models/best.pt
+
+# Uploads, browser previews, detection results and the chat database all live
+# under /app/outputs. Mount this path as a persistent volume in production.
+VOLUME ["/app/outputs"]
 
 EXPOSE 5000
 

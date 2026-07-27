@@ -22,7 +22,7 @@ os.environ.setdefault(
 import cv2
 from ultralytics import YOLO
 
-from project_config import OUTPUTS_DIR, YOLO_MODEL_PATH
+from project_config import OUTPUTS_DIR, YOLO_DEVICE, YOLO_MODEL_PATH
 from task2_yolo.postprocess import (
     bbox_containment,
     bbox_iou,
@@ -335,6 +335,7 @@ def detect_yiwu(
         agnostic_nms=False,
         save=False,
         verbose=False,
+        **({"device": YOLO_DEVICE} if YOLO_DEVICE else {}),
     )
 
     objects: List[Dict[str, Any]] = []

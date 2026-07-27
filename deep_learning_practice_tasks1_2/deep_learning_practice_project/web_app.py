@@ -965,6 +965,65 @@ def output_file(filename: str):
     return send_from_directory(OUTPUTS_DIR, filename)
 
 
+@app.get("/api/health")
+def api_health():
+    """Report deployment readiness without exposing credentials."""
+
+    model_ready = DEFAULT_YOLO_MODEL.is_file() and DEFAULT_YOLO_MODEL.stat().st_size > 0
+    outputs_ready = OUTPUTS_DIR.is_dir() and os.access(OUTPUTS_DIR, os.W_OK)
+    llm_ready = bool(app.config.get("AGENT_LLM_ENABLED"))
+    configured_device = (os.getenv("YOLO_DEVICE") or "").strip().lower()
+    cuda_required = bool(configured_device and configured_device != "cpu")
+    try:
+        import torch
+
+        cuda_available = bool(torch.cuda.is_available())
+        cuda_device_name = (
+            torch.cuda.get_device_name(0) if cuda_available else ""
+        )
+        torch_cuda_version = str(torch.version.cuda or "")
+    except Exception:
+        cuda_available = False
+        cuda_device_name = ""
+        torch_cuda_version = ""
+    compute_ready = not cuda_required or cuda_available
+    ready = model_ready and outputs_ready and llm_ready and compute_ready
+    payload = {
+        "ok": ready,
+        "status": "ready" if ready else "not_ready",
+        "checks": {
+            "detection_model": {
+                "ok": model_ready,
+                "path": display_path(DEFAULT_YOLO_MODEL),
+            },
+            "llm": {
+                "ok": llm_ready,
+                "provider": (os.getenv("LLM_PROVIDER") or "").strip().lower(),
+                "model": (
+                    os.getenv("LLM_C4AI_MODEL")
+                    if (os.getenv("LLM_PROVIDER") or "").strip().lower() == "c4ai"
+                    else os.getenv("LLM_DEEPSEEK_MODEL")
+                )
+                or "",
+                "error": app.config.get("AGENT_LLM_INIT_ERROR", ""),
+            },
+            "media_storage": {
+                "ok": outputs_ready,
+                "path": display_path(OUTPUTS_DIR),
+            },
+            "compute": {
+                "ok": compute_ready,
+                "configured_device": configured_device or "auto",
+                "cuda_required": cuda_required,
+                "cuda_available": cuda_available,
+                "cuda_device_name": cuda_device_name,
+                "torch_cuda_version": torch_cuda_version,
+            },
+        },
+    }
+    return jsonify(payload), 200 if ready else 503
+
+
 @app.post("/api/agent/chat")
 def api_agent_chat():
     try:
