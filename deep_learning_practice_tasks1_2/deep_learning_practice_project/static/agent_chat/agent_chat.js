@@ -44,7 +44,7 @@ function createMessage(role, text, isError = false, attachment = null) {
   return article;
 }
 
-let outputBaseUrl = "/outputs/";
+let outputBaseUrl = "outputs/";
 
 function outputPathToUrl(path) {
   const normalized = String(path || "").replaceAll("\\", "/");
@@ -580,15 +580,15 @@ export function mountAgentChat(root) {
   const realtimeCancel = root.querySelector("[data-agent-realtime-cancel]");
   const sessionTabs = root.querySelector("[data-agent-session-tabs]");
   const newSessionButton = root.querySelector("[data-agent-session-new]");
-  const endpoint = root.dataset.endpoint || "/api/agent/chat";
-  const historyEndpoint = root.dataset.historyEndpoint || "/api/agent/history";
+  const endpoint = root.dataset.endpoint || "api/agent/chat";
+  const historyEndpoint = root.dataset.historyEndpoint || "api/agent/history";
   const monitoringStopEndpoint = root.dataset.monitoringStopEndpoint
-    || "/api/agent/monitoring/stop";
+    || "api/agent/monitoring/stop";
   const monitoringEventsEndpoint = root.dataset.monitoringEventsEndpoint
-    || "/api/agent/monitoring/events";
-  const realtimeStatusEndpoint = root.dataset.realtimeStatusEndpoint || "/api/agent/realtime-inspection/status";
-  const realtimeEventsEndpoint = root.dataset.realtimeEventsEndpoint || "/api/agent/realtime-inspection/events";
-  const realtimeStopEndpoint = root.dataset.realtimeStopEndpoint || "/api/agent/realtime-inspection/stop";
+    || "api/agent/monitoring/events";
+  const realtimeStatusEndpoint = root.dataset.realtimeStatusEndpoint || "api/agent/realtime-inspection/status";
+  const realtimeEventsEndpoint = root.dataset.realtimeEventsEndpoint || "api/agent/realtime-inspection/events";
+  const realtimeStopEndpoint = root.dataset.realtimeStopEndpoint || "api/agent/realtime-inspection/stop";
   const realtimeStatusPollMs = boundedRealtimeInterval(root.dataset.realtimeStatusPollMs, 2000);
   const realtimeEventPollMs = boundedRealtimeInterval(root.dataset.realtimeEventPollMs, 1000);
   const realtimeRequestTimeoutMs = boundedRealtimeInterval(

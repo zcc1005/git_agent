@@ -217,3 +217,40 @@ docker run --rm --gpus all \
 
 CUDA 12.1 镜像体积显著大于 CPU 镜像，官方 PyTorch 基础层约 3 GB；应确认
 ACR 容量、服务器磁盘空间和首次拉取超时时间充足。
+
+## 7. 使用域名子路径
+
+默认 Compose 配置使用：
+
+```text
+APP_URL_PREFIX=/conveyor-belt-agent
+```
+
+因此页面、静态资源、API 和 `/outputs` 文件都会生成带前缀的地址。Nginx
+可以使用以下反向代理配置：
+
+```nginx
+location = /conveyor-belt-agent {
+    return 301 /conveyor-belt-agent/;
+}
+
+location /conveyor-belt-agent/ {
+    proxy_pass http://10.212.116.19:8000/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Prefix /conveyor-belt-agent;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    client_max_body_size 2g;
+}
+```
+
+最终访问地址为：
+
+```text
+https://www.sanrenxietong.com/conveyor-belt-agent/
+```
+
+如果以后更换域名路径，只需修改 `APP_URL_PREFIX` 和反向代理 location，无需
+修改前端 JavaScript 中的 API 地址。

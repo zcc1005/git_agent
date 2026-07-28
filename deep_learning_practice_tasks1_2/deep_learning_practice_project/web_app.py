@@ -53,8 +53,44 @@ from video_detection import (
 )
 
 
+def normalize_url_prefix(value: str | None) -> str:
+    """Return a safe WSGI script prefix such as /conveyor-belt-agent."""
+
+    prefix = str(value or "").strip()
+    if not prefix or prefix == "/":
+        return ""
+    if "://" in prefix or "?" in prefix or "#" in prefix:
+        raise ValueError("APP_URL_PREFIX 必须是类似 /conveyor-belt-agent 的路径")
+    return f"/{prefix.strip('/')}"
+
+
+class ReverseProxyPrefixMiddleware:
+    """Support proxies that either preserve or strip an external URL prefix."""
+
+    def __init__(self, wsgi_app: Any, configured_prefix: str = "") -> None:
+        self.wsgi_app = wsgi_app
+        self.configured_prefix = normalize_url_prefix(configured_prefix)
+
+    def __call__(self, environ: Dict[str, Any], start_response: Any) -> Any:
+        forwarded_prefix = str(environ.get("HTTP_X_FORWARDED_PREFIX") or "")
+        forwarded_prefix = forwarded_prefix.split(",", 1)[0].strip()
+        prefix = normalize_url_prefix(forwarded_prefix) or self.configured_prefix
+        if prefix:
+            path_info = str(environ.get("PATH_INFO") or "/")
+            if path_info == prefix:
+                path_info = "/"
+            elif path_info.startswith(f"{prefix}/"):
+                path_info = path_info[len(prefix):] or "/"
+            environ["SCRIPT_NAME"] = prefix
+            environ["PATH_INFO"] = path_info
+        return self.wsgi_app(environ, start_response)
+
+
+APP_URL_PREFIX = normalize_url_prefix(os.getenv("APP_URL_PREFIX"))
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024
+app.config["APPLICATION_ROOT"] = APP_URL_PREFIX or "/"
+app.wsgi_app = ReverseProxyPrefixMiddleware(app.wsgi_app, APP_URL_PREFIX)
 pipeline_lock = threading.Lock()
 
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
@@ -1169,8 +1205,8 @@ def api_agent_monitoring_start():
             **result,
             "session_id": session_id,
             "polling": {
-                "status_url": "/api/agent/monitoring/status",
-                "events_url": "/api/agent/monitoring/events",
+                "status_url": url_for("api_agent_monitoring_status"),
+                "events_url": url_for("api_agent_monitoring_events"),
                 "recommended_interval_ms": 2000,
             },
         }
@@ -1188,8 +1224,8 @@ def api_agent_realtime_inspection_start():
             "start-realtime-inspection", session_id=session_id, arguments=payload
         )
         return jsonify({**result, "session_id": session_id,
-                        "status_url": "/api/agent/realtime-inspection/status",
-                        "events_url": "/api/agent/realtime-inspection/events",
+                        "status_url": url_for("api_agent_realtime_inspection_status"),
+                        "events_url": url_for("api_agent_realtime_inspection_events"),
                         "polling": {"recommended_interval_ms": 3000}}), _monitoring_http_status(result)
     except (TypeError, ValueError) as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

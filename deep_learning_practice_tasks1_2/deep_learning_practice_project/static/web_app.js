@@ -9,8 +9,9 @@ const historyRiskFilter = document.getElementById("historyRiskFilter");
 const HISTORY_STORAGE_KEY = "belt-guard-front-history-v2";
 const AGENT_SESSION_STORAGE_KEY = "foreign-object-agent-session";
 const ALARM_RECONCILIATION_STORAGE_KEY = "belt-guard-alarm-reconciliation-v1";
-const CONSOLE_SNAPSHOT_ENDPOINT = "/api/console/snapshot";
-const CONSOLE_ALARM_ACTION_ENDPOINT = "/api/console/alarms/action";
+const CONSOLE_SNAPSHOT_ENDPOINT = document.body.dataset.consoleSnapshotEndpoint || "api/console/snapshot";
+const CONSOLE_ALARM_ACTION_ENDPOINT = document.body.dataset.consoleAlarmActionEndpoint || "api/console/alarms/action";
+const OUTPUT_BASE_URL = document.body.dataset.outputBaseUrl || "outputs/";
 const RISK_NAMES = { none: "无报警", low: "低风险", medium: "中风险", high: "高风险" };
 const VIEW_NAMES = new Set(["dashboard", "alarms", "history"]);
 let selectedAlarmId = "";
@@ -229,13 +230,14 @@ function firstEventFrame(value) {
 
 function outputPathToUrl(path) {
   const normalized = String(path || "").replaceAll("\\", "/");
-  if (/^https?:\/\//i.test(normalized) || normalized.startsWith("/outputs/")) return normalized;
+  if (/^https?:\/\//i.test(normalized)) return normalized;
   const marker = "/outputs/";
   const markerIndex = normalized.toLowerCase().lastIndexOf(marker);
   const relative = markerIndex >= 0
     ? normalized.slice(markerIndex + marker.length)
     : normalized.replace(/^outputs\//i, "");
-  return `/outputs/${relative.split("/").map(encodeURIComponent).join("/")}`;
+  const base = OUTPUT_BASE_URL.endsWith("/") ? OUTPUT_BASE_URL : `${OUTPUT_BASE_URL}/`;
+  return `${base}${relative.split("/").filter(Boolean).map(encodeURIComponent).join("/")}`;
 }
 
 function formatClassCounts(classCounts) {

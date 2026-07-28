@@ -269,6 +269,38 @@ class AgentWebIntegrationTests(unittest.TestCase):
         self.assertNotIn('id="agentPhaseTrack"', html)
         self.assertNotIn('<span class="active">理解</span>', html)
 
+    def test_reverse_proxy_subpath_loads_frontend_and_api_urls(self) -> None:
+        prefix = "/conveyor-belt-agent"
+        headers = {"X-Forwarded-Prefix": prefix}
+
+        stripped_response = self.client.get("/", headers=headers)
+        stripped_html = stripped_response.get_data(as_text=True)
+        preserved_response = self.client.get(f"{prefix}/", headers=headers)
+        css_response = self.client.get(
+            f"{prefix}/static/web_app.css",
+            headers=headers,
+        )
+
+        self.assertEqual(stripped_response.status_code, 200)
+        self.assertEqual(preserved_response.status_code, 200)
+        self.assertEqual(css_response.status_code, 200)
+        self.assertIn(
+            f'href="{prefix}/static/web_app.css"',
+            stripped_html,
+        )
+        self.assertIn(
+            f'data-console-snapshot-endpoint="{prefix}/api/console/snapshot"',
+            stripped_html,
+        )
+        self.assertIn(
+            f'data-endpoint="{prefix}/api/agent/chat"',
+            stripped_html,
+        )
+        self.assertIn(
+            f'data-output-base-url="{prefix}/outputs/"',
+            stripped_html,
+        )
+
     def test_web_service_wires_llm_knowledge_answerer(self) -> None:
         from web_app import create_web_agent_service
 

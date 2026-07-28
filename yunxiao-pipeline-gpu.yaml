@@ -209,7 +209,7 @@ stages:
                 -f "${COMPOSE_FILE}" \
                 -f "${GPU_COMPOSE_FILE}" \
                 exec -T web \
-                python -c "import urllib.request; response=urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=10); assert response.status == 200" \
+                python -c "import os, urllib.request; raw=os.getenv('APP_URL_PREFIX', '').strip('/'); prefix=f'/{raw}' if raw else ''; paths=['/api/health', f'{prefix}/', f'{prefix}/static/web_app.css', f'{prefix}/static/web_app.js']; responses=[urllib.request.urlopen(f'http://127.0.0.1:5000{path}', timeout=10) for path in paths]; assert all(response.status == 200 for response in responses); assert all(response.read(1) for response in responses)" \
                 >/dev/null 2>&1; then
                 WEB_READY=true
                 break
