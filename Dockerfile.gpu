@@ -41,6 +41,19 @@ RUN mkdir -p /app/outputs /app/runs /models
 COPY deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/yiwu_yolov8s_4class/weights/best.pt /models/best.pt
 RUN test -s /models/best.pt
 
+# Non-secret deployment assets are copied to a bootstrap directory. Yunxiao
+# extracts them after pulling the image, so a clean server does not need a
+# separate source checkout or a manual server_bundle upload.
+RUN mkdir -p /opt/belt-agent-bootstrap/deploy
+COPY compose.yaml /opt/belt-agent-bootstrap/compose.yaml
+COPY compose.gpu.yaml /opt/belt-agent-bootstrap/compose.gpu.yaml
+COPY deploy/mediamtx.yml /opt/belt-agent-bootstrap/deploy/mediamtx.yml
+COPY deep_learning_practice_tasks1_2/deep_learning_practice_project/data/monitor/monitor.mp4 /opt/belt-agent-bootstrap/demo.mp4
+RUN test -s /opt/belt-agent-bootstrap/compose.yaml \
+    && test -s /opt/belt-agent-bootstrap/compose.gpu.yaml \
+    && test -s /opt/belt-agent-bootstrap/deploy/mediamtx.yml \
+    && test -s /opt/belt-agent-bootstrap/demo.mp4
+
 VOLUME ["/app/outputs"]
 
 EXPOSE 5000

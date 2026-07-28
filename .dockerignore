@@ -34,6 +34,14 @@ deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/yiwu_yo
 deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/yiwu_yolov8s_4class/weights/*
 !deep_learning_practice_tasks1_2/deep_learning_practice_project/runs/yolo/yiwu_yolov8s_4class/weights/best.pt
 
+# The GPU deployment image carries one small bootstrap demo so Yunxiao can
+# provision a new server without manually copying repository files.
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/data/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/data/*
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/data/monitor/
+deep_learning_practice_tasks1_2/deep_learning_practice_project/data/monitor/*
+!deep_learning_practice_tasks1_2/deep_learning_practice_project/data/monitor/monitor.mp4
+
 # Local logs and editor files
 **/*.log
 **/.idea/

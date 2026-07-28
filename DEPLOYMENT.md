@@ -193,19 +193,18 @@ Docker 容器一定能访问 GPU。
 
 1. 使用 `Dockerfile.gpu` 构建并推送 CUDA 镜像到 ACR。
 2. 在更新服务前，用本次镜像实际执行一次 64×64 YOLO GPU 推理。
-3. 使用 `compose.yaml + compose.gpu.yaml` 启动 Web、MediaMTX 和 FFmpeg。
-4. 强制检查运行容器中的 `torch.cuda.is_available()` 和 `YOLO_DEVICE=0`。
-5. 任一 GPU 检查失败时终止部署，不再静默回退到 CPU。
+3. 从镜像自动提取 Compose、MediaMTX 配置和 demo 视频到 `/opt/belt-agent`。
+4. 使用 `compose.yaml + compose.gpu.yaml` 启动 Web、MediaMTX 和 FFmpeg。
+5. 强制检查运行容器中的 `torch.cuda.is_available()` 和 `YOLO_DEVICE=0`。
+6. 任一 GPU 检查失败时终止部署，不再静默回退到 CPU。
 
-云效部署直接从 ACR 拉镜像，因此不需要 `belt-agent.tar`。服务器需要提前有：
+云效部署直接从 ACR 拉镜像，因此不需要 `belt-agent.tar`，也无需手工上传
+Compose、MediaMTX 配置和 demo 视频。`app.env` 有两种准备方式：
 
-```text
-/opt/belt-agent/compose.yaml
-/opt/belt-agent/compose.gpu.yaml
-/opt/belt-agent/deploy/mediamtx.yml
-/opt/belt-agent/app.env
-/opt/belt-agent/demo.mp4
-```
+1. 提前上传 `/opt/belt-agent/app.env`，流水线会一直复用。
+2. 在云效中添加保密变量 `LLM_C4AI_API_KEY`，首次部署时自动生成。
+
+不要把 `LLM_C4AI_API_KEY` 配置成普通字符串变量，也不要写入流水线 YAML。
 
 服务器最低自检：
 
