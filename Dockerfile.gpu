@@ -3,6 +3,8 @@
 # CUDA 12.1 requires an NVIDIA Linux driver compatible with CUDA 12.x.
 # The deployment pipeline performs a real `torch.cuda.is_available()` smoke
 # test before replacing the running application.
+FROM bluenviron/mediamtx:1 AS mediamtx
+
 FROM pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -24,6 +26,12 @@ RUN apt-get update \
         libxext6 \
         libxrender1 \
     && rm -rf /var/lib/apt/lists/*
+
+# The target server cannot access Docker Hub. Carry the small MediaMTX binary
+# in the ACR-hosted application image; FFmpeg is already installed above.
+# Compose can then run all three services from the same shared image layers.
+COPY --from=mediamtx /mediamtx /mediamtx
+RUN test -x /mediamtx
 
 WORKDIR /app
 

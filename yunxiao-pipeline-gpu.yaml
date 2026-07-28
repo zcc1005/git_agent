@@ -165,6 +165,8 @@ stages:
 
             echo "6. 校验Compose配置"
             export WEB_IMAGE="${IMAGE}"
+            export RTSP_IMAGE="${IMAGE}"
+            export RTSP_PUBLISHER_IMAGE="${IMAGE}"
             export APP_ENV_FILE
             export DEMO_VIDEO_PATH
             export MEDIAMTX_CONFIG_PATH

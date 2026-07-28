@@ -1,6 +1,8 @@
 services:
   rtsp:
-    image: bluenviron/mediamtx:1
+    image: ${RTSP_IMAGE:-bluenviron/mediamtx:1}
+    entrypoint: ["/mediamtx"]
+    command: ["/mediamtx.yml"]
     volumes:
       - type: bind
         source: ${MEDIAMTX_CONFIG_PATH:-./deploy/mediamtx.yml}
@@ -11,7 +13,8 @@ services:
     restart: unless-stopped
 
   rtsp-publisher:
-    image: jrottenberg/ffmpeg:7.1-alpine
+    image: ${RTSP_PUBLISHER_IMAGE:-jrottenberg/ffmpeg:7.1-alpine}
+    entrypoint: ["ffmpeg"]
     depends_on:
       rtsp:
         condition: service_started
