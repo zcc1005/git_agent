@@ -56,6 +56,7 @@ stages:
             APP_ENV_FILE="${DEPLOY_DIR}/app.env"
             DEMO_VIDEO_PATH="${DEPLOY_DIR}/demo.mp4"
             MEDIAMTX_CONFIG_PATH="${DEPLOY_DIR}/deploy/mediamtx.yml"
+            WEB_HOST_PORT="${WEB_HOST_PORT:-8000}"
 
             echo "=================================================="
             echo "开始部署GPU传送带异物检测智能体"
@@ -168,6 +169,7 @@ stages:
 
             echo "6. 校验Compose配置"
             export WEB_IMAGE="${IMAGE}"
+            export WEB_HOST_PORT
             export APP_ENV_FILE
             export DEMO_VIDEO_PATH
             export MEDIAMTX_CONFIG_PATH
@@ -251,6 +253,6 @@ stages:
             echo "=================================================="
             echo "GPU与RTSP服务部署成功"
             echo "镜像：${IMAGE}"
-            echo "访问地址：http://10.212.116.19:8080"
+            echo "访问地址：http://10.212.116.19:${WEB_HOST_PORT}"
             echo "RTSP内部地址：rtsp://rtsp:8554/main-monitor"
             echo "=================================================="

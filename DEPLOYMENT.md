@@ -50,7 +50,7 @@ APP_ENV_FILE=./app.env docker compose up -d --no-build
 docker run -d --name belt-agent \
   --env-file /opt/belt-agent/.env \
   -e YOLO_MODEL_PATH=/models/best.pt \
-  -p 8080:5000 \
+  -p 8000:5000 \
   -v belt_agent_outputs:/app/outputs \
   --add-host=host.docker.internal:host-gateway \
   belt-agent:latest
@@ -170,7 +170,7 @@ ffprobe -rtsp_transport tcp \
 ## 5. 部署自检
 
 ```bash
-curl http://127.0.0.1:8080/api/health
+curl http://127.0.0.1:8000/api/health
 docker compose logs -f web
 ```
 

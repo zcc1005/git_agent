@@ -84,7 +84,7 @@ services:
       rtsp-publisher:
         condition: service_healthy
     ports:
-      - "8080:5000"
+      - "${WEB_HOST_PORT:-8000}:5000"
     volumes:
       - app_outputs:/app/outputs
     extra_hosts:
