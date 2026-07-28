@@ -103,6 +103,9 @@ stages:
               -e YOLO_DEVICE=0 \
               "${IMAGE}" \
               python -c "import numpy as np, torch; from ultralytics import YOLO; assert torch.cuda.is_available(), '容器无法访问CUDA，请安装/修复nvidia-container-toolkit'; print('GPU:', torch.cuda.get_device_name(0)); print('PyTorch:', torch.__version__, 'CUDA:', torch.version.cuda); model=YOLO('/models/best.pt'); model.predict(source=np.zeros((64,64,3), dtype=np.uint8), imgsz=64, device=0, verbose=False); print('GPU YOLO inference: OK')"
+            docker run --rm --entrypoint /bin/sh \
+              "${IMAGE}" \
+              -c 'test -x /mediamtx && command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null && ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx264'
 
             echo "5. 从本次镜像初始化服务器部署文件"
             mkdir -p "${DEPLOY_DIR}/deploy"
@@ -165,8 +168,6 @@ stages:
 
             echo "6. 校验Compose配置"
             export WEB_IMAGE="${IMAGE}"
-            export RTSP_IMAGE="${IMAGE}"
-            export RTSP_PUBLISHER_IMAGE="${IMAGE}"
             export APP_ENV_FILE
             export DEMO_VIDEO_PATH
             export MEDIAMTX_CONFIG_PATH
@@ -174,20 +175,28 @@ stages:
               -f "${COMPOSE_FILE}" \
               -f "${GPU_COMPOSE_FILE}" \
               config -q
+            RESOLVED_IMAGES="$(
+              docker compose \
+                -f "${COMPOSE_FILE}" \
+                -f "${GPU_COMPOSE_FILE}" \
+                config --images | sort -u
+            )"
+            if [ "${RESOLVED_IMAGES}" != "${IMAGE}" ]; then
+              echo "错误：Compose中存在非本次ACR镜像，拒绝部署"
+              echo "期望：${IMAGE}"
+              echo "实际：${RESOLVED_IMAGES}"
+              exit 1
+            fi
 
             echo "7. 停止上一次旧版单容器部署（如存在）"
             docker stop conveyor-belt-agent 2>/dev/null || true
             docker rm conveyor-belt-agent 2>/dev/null || true
 
-            echo "8. 拉取并启动MediaMTX、FFmpeg和GPU Web服务"
+            echo "8. 使用已拉取的ACR镜像启动MediaMTX、FFmpeg和GPU Web服务"
             docker compose \
               -f "${COMPOSE_FILE}" \
               -f "${GPU_COMPOSE_FILE}" \
-              pull rtsp rtsp-publisher
-            docker compose \
-              -f "${COMPOSE_FILE}" \
-              -f "${GPU_COMPOSE_FILE}" \
-              up -d --no-build --remove-orphans
+              up -d --no-build --pull never --remove-orphans
 
             echo "9. 等待应用健康"
             WEB_READY=false

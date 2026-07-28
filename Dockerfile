@@ -3,6 +3,8 @@
 # CPU-friendly runtime for the Flask/YOLO application.  A GPU-enabled
 # deployment can replace this base image and install the corresponding
 # CUDA-enabled PyTorch wheel without changing the application code.
+FROM bluenviron/mediamtx:1 AS mediamtx
+
 FROM python:3.11-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -23,6 +25,11 @@ RUN apt-get update \
         libxext6 \
         libxrender1 \
     && rm -rf /var/lib/apt/lists/*
+
+# Keep the local/CPU Compose path self-contained as well. All runtime services
+# can use the same application image without pulling public images separately.
+COPY --from=mediamtx /mediamtx /mediamtx
+RUN test -x /mediamtx
 
 WORKDIR /app
 

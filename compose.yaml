@@ -1,6 +1,6 @@
 services:
   rtsp:
-    image: ${RTSP_IMAGE:-bluenviron/mediamtx:1}
+    image: ${WEB_IMAGE:-belt-agent:latest}
     entrypoint: ["/mediamtx"]
     command: ["/mediamtx.yml"]
     volumes:
@@ -13,7 +13,7 @@ services:
     restart: unless-stopped
 
   rtsp-publisher:
-    image: ${RTSP_PUBLISHER_IMAGE:-jrottenberg/ffmpeg:7.1-alpine}
+    image: ${WEB_IMAGE:-belt-agent:latest}
     entrypoint: ["ffmpeg"]
     depends_on:
       rtsp:
